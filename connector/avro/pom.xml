@@ -118,7 +118,7 @@
             <configuration>
               <includeMavenTypes>direct</includeMavenTypes>
               <inputDirectories>
-                <include>${project.basedir}/src/main/protobuf</include>
+                <include>${project.basedir}/src/test/resources/protobuf</include>
               </inputDirectories>
               <outputTargets>
                 <outputTarget>

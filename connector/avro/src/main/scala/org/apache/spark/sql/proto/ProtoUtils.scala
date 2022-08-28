@@ -16,7 +16,7 @@
  */
 package org.apache.spark.sql.proto
 
-import com.google.protobuf.DescriptorProtos
+import com.google.protobuf.{DescriptorProtos, Descriptors, InvalidProtocolBufferException}
 import com.google.protobuf.DescriptorProtos.FileDescriptorProto
 
 import java.util.Locale
@@ -36,7 +36,7 @@ import org.apache.spark.sql.types.{ArrayType, AtomicType, DataType, MapType, Nul
 import org.apache.spark.util.Utils
 import org.apache.spark.sql.catalyst.InternalRow
 
-import java.io.{FileInputStream, FileNotFoundException, IOException}
+import java.io.{BufferedInputStream, FileInputStream, FileNotFoundException, IOException}
 
 private[sql] object ProtoUtils extends Logging {
 
@@ -274,8 +274,48 @@ private[sql] object ProtoUtils extends Logging {
         getFieldByName(fieldName)
       }
     }
+  }
 
+  def buildDescriptor(protoFilePath: String, messageName: String): Descriptor = {
+    val fileDescriptor: Descriptors.FileDescriptor = parseFileDescriptor(protoFilePath)
+    var result: Descriptors.Descriptor  = null;
 
+    for(descriptor <- fileDescriptor.getMessageTypes.asScala) {
+      println(descriptor.toProto.toString)
+      if (descriptor.getName().equals(messageName)) {
+        result = descriptor
+      }
+    }
+
+    if (null == result) {
+      throw new RuntimeException("Unable to locate Message '" + messageName + "' in Descriptor");
+    }
+    result
+  }
+
+  def parseFileDescriptor(protoFilePath: String): Descriptors.FileDescriptor = {
+    var fileDescriptorSet: DescriptorProtos.FileDescriptorSet = null
+    try {
+      val dscFile = new BufferedInputStream(new FileInputStream(protoFilePath))
+      fileDescriptorSet = DescriptorProtos.FileDescriptorSet.parseFrom(dscFile)
+    } catch {
+      case ex: InvalidProtocolBufferException =>
+        throw new RuntimeException("Error parsing descriptor byte[] into Descriptor object", ex)
+      case ex: IOException =>
+        throw new RuntimeException("Error reading proto file at path: " + protoFilePath, ex)
+    }
+
+    val descriptorProto: DescriptorProtos.FileDescriptorProto = fileDescriptorSet.getFile(0)
+    try {
+      val fileDescriptor: Descriptors.FileDescriptor = Descriptors.FileDescriptor.buildFrom(descriptorProto, new Array[Descriptors.FileDescriptor](0))
+      if (fileDescriptor.getMessageTypes().isEmpty()) {
+        throw new RuntimeException("No MessageTypes returned, " + fileDescriptor.getName());
+      }
+      fileDescriptor
+    } catch {
+      case e : Descriptors.DescriptorValidationException =>
+        throw new RuntimeException("Error constructing FileDescriptor", e)
+    }
   }
 
   /**

@@ -34,8 +34,8 @@ object functions {
    * @since 3.0.0
    */
   @Experimental
-  def from_proto(data: Column, descriptor: SimpleMessageProtos.SimpleMessage): Column = {
-    new Column(ProtoDataToCatalyst(data.expr, descriptor, Map.empty))
+  def from_proto(data: Column, filePath: String, messageName: Option[String]): Column = {
+    new Column(ProtoDataToCatalyst(data.expr, filePath, messageName, Map.empty))
   }
 
   /**

@@ -28,11 +28,6 @@ class ProtoFunctionsSuite extends QueryTest with SharedSparkSession with Seriali
 
   test("roundtrip in to_proto and from_proto - int and string") {
     //val df = spark.range(10).select($"id", $"id".cast("string").as("str"))
-    val otherMessage = OtherMessageProtos
-      .OtherMessage.newBuilder()
-      .setKey("other_key")
-      .setOther(123).build()
-
     val simpleMessage = SimpleMessage.newBuilder()
       .setKey("123")
       .setQuery("spark-query")
@@ -40,26 +35,24 @@ class ProtoFunctionsSuite extends QueryTest with SharedSparkSession with Seriali
       .setResultsPerPage(123)
       .addArrayKey("value1")
       .addArrayKey("value2")
-      .setOther(otherMessage)
+      //.setOther(otherMessage)
       .build()
 
     val df = Seq(simpleMessage.toByteArray).toDF("value")
     val simpleMessageObj = SimpleMessage.newBuilder().build()
-    val dfRes = df.select(functions.from_proto($"value", simpleMessageObj).as("value"))
+    val SIMPLE_MESSAGE = "protobuf/simple_message.desc"
+    val simpleMessagePath = testFile(SIMPLE_MESSAGE).replace("file:/", "/")
+    val dfRes = df.select(functions.from_proto($"value", simpleMessagePath, Some("SimpleMessage")).as("value"))
     dfRes.select($"value.*").show()
     dfRes.printSchema()
     val dfRes2 = dfRes.select(functions.to_proto($"value", simpleMessageObj).as("value2"))
     dfRes2.show()
-    val dfRes3 = dfRes2.select(functions.from_proto($"value2", simpleMessageObj).as("value3"))
+    val dfRes3 = dfRes2.select(functions.from_proto($"value2", simpleMessagePath, Some("SimpleMessage")).as("value3"))
     dfRes3.select($"value3.*").show()
     dfRes3.printSchema()
-  }
-
-  test("reading proto files from .pb format") {
-    //    withTempPath { dir =>
-    //      val df = spark.read.format("proto").option("protoSchemaUrl", "saved_model.pb").load("saved_model.pb")
-    //      df.show()
-    //    }
+    val MULTIPLE_EXAMPLE = "protobuf/protobuf_multiple_message.desc"
+    val desc = ProtoUtils.buildDescriptor(testFile(MULTIPLE_EXAMPLE).replace("file:/", "/"), "MultipleExample")
+    println(desc.toProto.toString)
   }
 
   def parseSchema(intputStream : InputStream) = {

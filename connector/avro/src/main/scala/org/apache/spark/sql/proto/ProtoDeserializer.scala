@@ -164,7 +164,7 @@ private[sql] class ProtoDeserializer(
 
     val protoSchemaHelper = new ProtoUtils.ProtoSchemaHelper(
       protoType, catalystType, protoPath, catalystPath, positionalFieldMatch)
-
+    
     protoSchemaHelper.validateNoExtraCatalystFields(ignoreNullable = true)
     // no need to validateNoExtraProtoFields since extra Proto fields are ignored
 

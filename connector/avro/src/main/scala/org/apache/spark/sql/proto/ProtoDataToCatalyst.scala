@@ -27,7 +27,7 @@ import org.apache.spark.sql.types.{AbstractDataType, BinaryType, DataType, Struc
 
 import scala.util.control.NonFatal
 
-private[proto] case class ProtoDataToCatalyst(child: Expression, simpleMessage: SimpleMessageProtos.SimpleMessage,
+private[proto] case class ProtoDataToCatalyst(child: Expression, filePath: String, messageName: Option[String],
                                               options: Map[String, String])
   extends UnaryExpression with ExpectsInputTypes {
 
@@ -48,7 +48,7 @@ private[proto] case class ProtoDataToCatalyst(child: Expression, simpleMessage: 
 
   private lazy val protoOptions = ProtoOptions(options)
 
-  @transient private lazy val descriptor = simpleMessage.getDescriptorForType
+  @transient private lazy val descriptor = ProtoUtils.buildDescriptor(filePath, messageName.get)
 
   @transient private lazy val actualSchema = descriptor
 
