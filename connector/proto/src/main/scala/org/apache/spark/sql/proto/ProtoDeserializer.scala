@@ -119,17 +119,17 @@ private[sql] class ProtoDeserializer(
     * updater.
     */
   private def newWriter(
-                         protoType: FieldDescriptor,
+                         field: FieldDescriptor,
                          catalystType: DataType,
                          protoPath: Seq[String],
                          catalystPath: Seq[String]): (CatalystDataUpdater, Int, Any) => Unit = {
     val errorPrefix = s"Cannot convert Proto ${toFieldStr(protoPath)} to " +
       s"SQL ${toFieldStr(catalystPath)} because "
     val incompatibleMsg = errorPrefix +
-      s"schema is incompatible (protoType = ${protoType} ${protoType.toProto.getLabel} ${protoType.getJavaType} " +
-      s"${protoType.getType}, sqlType = ${catalystType.sql})"
+      s"schema is incompatible (protoType = ${field} ${field.toProto.getLabel} ${field.getJavaType} " +
+      s"${field.getType}, sqlType = ${catalystType.sql})"
 
-    (protoType.getJavaType, catalystType) match {
+    (field.getJavaType, catalystType) match {
 
       case (null, NullType) => (updater, ordinal, _) =>
         updater.setNullAt(ordinal)
@@ -139,14 +139,14 @@ private[sql] class ProtoDeserializer(
         updater.setBoolean(ordinal, value.asInstanceOf[Boolean])
 
       case (BOOLEAN, ArrayType(BooleanType, containsNull)) =>
-        newArrayWriter(protoType, catalystType, protoPath,
+        newArrayWriter(field, catalystType, protoPath,
           catalystPath, BooleanType, containsNull)
 
       case (INT, IntegerType) => (updater, ordinal, value) =>
         updater.setInt(ordinal, value.asInstanceOf[Int])
 
       case (INT, ArrayType(IntegerType, containsNull)) =>
-        newArrayWriter(protoType, catalystType, protoPath,
+        newArrayWriter(field, catalystType, protoPath,
           catalystPath, IntegerType, containsNull)
 
       case (INT, DateType) => (updater, ordinal, value) =>
@@ -156,21 +156,21 @@ private[sql] class ProtoDeserializer(
         updater.setLong(ordinal, value.asInstanceOf[Long])
 
       case (LONG, ArrayType(LongType, containsNull)) =>
-        newArrayWriter(protoType, catalystType, protoPath,
+        newArrayWriter(field, catalystType, protoPath,
           catalystPath, LongType, containsNull)
 
       case (FLOAT, FloatType) => (updater, ordinal, value) =>
         updater.setFloat(ordinal, value.asInstanceOf[Float])
 
       case (FLOAT, ArrayType(FloatType, containsNull)) =>
-        newArrayWriter(protoType, catalystType, protoPath,
+        newArrayWriter(field, catalystType, protoPath,
           catalystPath, FloatType, containsNull)
 
       case (DOUBLE, DoubleType) => (updater, ordinal, value) =>
         updater.setDouble(ordinal, value.asInstanceOf[Double])
 
       case (DOUBLE, ArrayType(DoubleType, containsNull)) =>
-        newArrayWriter(protoType, catalystType, protoPath,
+        newArrayWriter(field, catalystType, protoPath,
           catalystPath, DoubleType, containsNull)
 
       case (STRING, StringType) => (updater, ordinal, value) =>
@@ -180,7 +180,7 @@ private[sql] class ProtoDeserializer(
         updater.set(ordinal, str)
 
       case (STRING, ArrayType(StringType, containsNull)) =>
-        newArrayWriter(protoType, catalystType, protoPath,
+        newArrayWriter(field, catalystType, protoPath,
           catalystPath, StringType, containsNull)
 
       case (BYTE_STRING, BinaryType) => (updater, ordinal, value) =>
@@ -191,11 +191,11 @@ private[sql] class ProtoDeserializer(
         updater.set(ordinal, byte_array)
 
       case (BYTE_STRING, ArrayType(BinaryType, containsNull)) =>
-        newArrayWriter(protoType, catalystType, protoPath,
+        newArrayWriter(field, catalystType, protoPath,
           catalystPath, BinaryType, containsNull)
 
       case (MESSAGE, st: StructType) =>
-        val writeRecord = getRecordWriter(protoType.getMessageType, st, protoPath,
+        val writeRecord = getRecordWriter(field.getMessageType, st, protoPath,
           catalystPath, applyFilters = _ => false)
         (updater, ordinal, value) =>
           val row = new SpecificInternalRow(st)
@@ -203,14 +203,14 @@ private[sql] class ProtoDeserializer(
           updater.set(ordinal, row)
 
       case (MESSAGE, ArrayType(st: StructType, containsNull)) =>
-        newArrayWriter(protoType, catalystType, protoPath,
+        newArrayWriter(field, catalystType, protoPath,
           catalystPath, st, containsNull)
 
       case (ENUM, StringType) => (updater, ordinal, value) =>
         updater.set(ordinal, UTF8String.fromString(value.toString))
 
       case (ENUM, ArrayType(StringType, containsNull)) =>
-        newArrayWriter(protoType, catalystType, protoPath,
+        newArrayWriter(field, catalystType, protoPath,
           catalystPath, StringType, containsNull)
 
       // TBD: Do we need this here ?

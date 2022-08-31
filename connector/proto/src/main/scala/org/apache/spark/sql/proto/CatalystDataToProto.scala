@@ -16,19 +16,33 @@
  */
 package org.apache.spark.sql.proto
 
-import com.google.protobuf.DynamicMessage
-
+import com.google.protobuf.DescriptorProtos.FileDescriptorProto
+import com.google.protobuf.Descriptors.FileDescriptor
+import com.google.protobuf.{Descriptors, DynamicMessage}
 import org.apache.spark.sql.catalyst.expressions.{Expression, UnaryExpression}
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
 import org.apache.spark.sql.types.{BinaryType, DataType}
 
 private[proto] case class CatalystDataToProto(
                                              child: Expression,
-                                             descFilePath: String, messageName: String) extends UnaryExpression {
+                                             descFilePath: Option[String], messageName: Option[String]) extends UnaryExpression {
 
   override def dataType: DataType = BinaryType
 
-  @transient private lazy val protoType = ProtoUtils.buildDescriptor(descFilePath, messageName)
+//  @transient private lazy val protoType = ProtoUtils.buildDescriptor(descFilePath, messageName)
+
+  @transient private lazy val protoType = (descFilePath, messageName) match {
+    case (Some(descFilePath), Some(messageName)) => {
+      val descriptor = ProtoUtils.buildDescriptor(descFilePath, messageName)
+      descriptor
+    }
+    case _ =>
+      val descriptorProto = SchemaConverters.toProtoType(child.dataType, child.nullable, messageName.getOrElse("root"))
+      val file: FileDescriptorProto = FileDescriptorProto.newBuilder().addMessageType(descriptorProto).build()
+      val fileDescriptor: FileDescriptor = FileDescriptor.buildFrom(file, new Array[Descriptors.FileDescriptor](0))
+      val descriptor = fileDescriptor.findMessageTypeByName(descriptorProto.getName)
+      descriptor
+  }
 
   @transient private lazy val serializer = new ProtoSerializer(child.dataType, protoType)
 

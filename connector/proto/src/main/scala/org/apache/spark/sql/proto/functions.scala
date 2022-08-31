@@ -17,7 +17,6 @@
 package org.apache.spark.sql.proto
 
 import scala.collection.JavaConverters._
-
 import org.apache.spark.annotation.Experimental
 import org.apache.spark.sql.Column
 
@@ -65,6 +64,17 @@ object functions {
    */
   @Experimental
   def to_proto(data: Column, descFilePath: String, messageName: String): Column = {
-    new Column(CatalystDataToProto(data.expr, descFilePath, messageName))
+    new Column(CatalystDataToProto(data.expr, Some(descFilePath), Some(messageName)))
+  }
+
+  /**
+   * Converts a column into binary of proto format.
+   *
+   * @param data the data column.
+   * @since 3.4.0
+   */
+  @Experimental
+  def to_proto(data: Column): Column = {
+    new Column(CatalystDataToProto(data.expr, None, Some(data.named.name)))
   }
 }

@@ -16,6 +16,8 @@
  */
 package org.apache.spark.sql.proto
 
+import scala.collection.JavaConverters._
+import com.google.protobuf.DescriptorProtos.{DescriptorProto, FieldDescriptorProto}
 import com.google.protobuf.Descriptors.{Descriptor, FieldDescriptor}
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.sql.types._
@@ -68,6 +70,113 @@ object SchemaConverters {
       if (fd.isRepeated) ArrayType(dt, containsNull = false) else dt,
       nullable = !fd.isRequired && !fd.isRepeated
     ))
+  }
+
+  /**
+   * Converts a Spark SQL schema to a corresponding Proto Descriptor
+   *
+   * @since 2.4.0
+   */
+  def toProtoType(
+                  catalystType: DataType,
+                  nullable: Boolean = false,
+                  recordName: String = "topLevelRecord",
+                  nameSpace: String = "",
+                  indexNum: Int = 0,
+                  descriptorProto: DescriptorProto.Builder = DescriptorProto.newBuilder())
+  : DescriptorProto = {
+    var index = indexNum
+    catalystType match {
+      case st: StructType =>
+        val childNameSpace = if (nameSpace != "") s"$nameSpace.$recordName" else recordName
+        descriptorProto.setName(childNameSpace)
+        st.foreach { f =>
+          index = index + 1
+          descriptorProto.addField(addProtoField(f.dataType, f.nullable, f.name, childNameSpace, index).build())
+        }
+//      case ym: YearMonthIntervalType =>
+//        val ymIntervalType = builder.intType()
+//        ymIntervalType.addProp(CATALYST_TYPE_PROP_NAME, ym.typeName)
+//        ymIntervalType
+//      case dt: DayTimeIntervalType =>
+//        val dtIntervalType = builder.longType()
+//        dtIntervalType.addProp(CATALYST_TYPE_PROP_NAME, dt.typeName)
+//        dtIntervalType
+      // This should never happen.
+      case other => throw new IncompatibleSchemaException(s"Unexpected type $other.")
+    }
+//    if (nullable && catalystType != NullType) {
+//      Schema.createUnion(schema, nullSchema)
+//    } else {
+//      schema
+//    }
+    descriptorProto.build()
+  }
+
+
+  def addProtoField(catalystType: DataType,
+               nullable: Boolean = false,
+               recordName: String = "topLevelRecord",
+               nameSpace: String = "",
+               indexNum: Int = 0) : FieldDescriptorProto.Builder = {
+    var index = indexNum
+    val protoField = catalystType match {
+      case BooleanType =>
+        addField("optional", FieldDescriptorProto.Type.TYPE_BOOL, recordName, index, null)
+      case ByteType | ShortType | IntegerType | DateType =>
+        addField("optional", FieldDescriptorProto.Type.TYPE_INT32, recordName, index, null)
+      case LongType =>
+        addField("optional", FieldDescriptorProto.Type.TYPE_INT64, recordName, index, null)
+      case TimestampType | TimestampNTZType =>
+        addField("optional", FieldDescriptorProto.Type.TYPE_INT64, recordName, index, null)
+      case FloatType =>
+        addField("optional", FieldDescriptorProto.Type.TYPE_FLOAT, recordName, index, null)
+      case DoubleType =>
+        addField("optional", FieldDescriptorProto.Type.TYPE_DOUBLE, recordName, index, null)
+      case StringType =>
+        addField("optional", FieldDescriptorProto.Type.TYPE_STRING, recordName, index, null)
+//      case NullType =>
+//      case d: DecimalType =>
+      //        val avroType = LogicalTypes.decimal(d.precision, d.scale)
+      //        val fixedSize = minBytesForPrecision(d.precision)
+      //        // Need to avoid naming conflict for the fixed fields
+      //        val name = nameSpace match {
+      //          case "" => s"$recordName.fixed"
+      //          case _ => s"$nameSpace.$recordName.fixed"
+      //        }
+      //        avroType.addToSchema(SchemaBuilder.fixed(name).size(fixedSize))
+      case ArrayType(et, containsNull) =>
+        addField("repeated", typeToFieldType.get(et.typeName), recordName, index, null)
+      case BinaryType =>
+        addField("optional", FieldDescriptorProto.Type.TYPE_BYTES, recordName, index, null)
+
+//      case MapType(StringType, vt, valueContainsNull) =>
+
+    }
+    protoField
+  }
+
+  val labelMap = Map("optional" -> FieldDescriptorProto.Label.LABEL_OPTIONAL,
+    "required" -> FieldDescriptorProto.Label.LABEL_REQUIRED,
+    "repeated" -> FieldDescriptorProto.Label.LABEL_REPEATED).asJava
+
+  val typeToFieldType = Map("long" -> FieldDescriptorProto.Type.TYPE_INT64,
+    "string"-> FieldDescriptorProto.Type.TYPE_STRING,
+    "integer"-> FieldDescriptorProto.Type.TYPE_INT32,
+    "long"-> FieldDescriptorProto.Type.TYPE_INT64,
+    "double"-> FieldDescriptorProto.Type.TYPE_DOUBLE,
+    "float"-> FieldDescriptorProto.Type.TYPE_FLOAT,
+    "boolean"-> FieldDescriptorProto.Type.TYPE_BOOL,
+    "binary" -> FieldDescriptorProto.Type.TYPE_BYTES).asJava
+
+  def addField(label: String, protoType: FieldDescriptorProto.Type, name: String , num: Int, defaultVal: String) : FieldDescriptorProto.Builder = {
+    val protoLabel: FieldDescriptorProto.Label = labelMap.get(label)
+    if (protoLabel == null) throw new IllegalArgumentException("Illegal label: " + label)
+    if (protoType == null) throw new IllegalArgumentException("Illegal type: ")
+    val fieldBuilder: FieldDescriptorProto.Builder = FieldDescriptorProto.newBuilder()
+    fieldBuilder.setLabel(protoLabel).setType(protoType).setName(name).setNumber(num)
+    if (defaultVal != null) fieldBuilder.setDefaultValue(defaultVal)
+    fieldBuilder
   }
 
   private[proto] class IncompatibleSchemaException(

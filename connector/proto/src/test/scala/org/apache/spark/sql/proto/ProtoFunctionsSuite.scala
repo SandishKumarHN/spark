@@ -42,8 +42,6 @@ class ProtoFunctionsSuite extends QueryTest with SharedSparkSession with Seriali
       .addRdoubleValue(1092093)
       .addRfloatValue(10903.0f)
       .addRfloatValue(10902.0f)
-      .addRnestedEnum(SimpleMessageRepeated.NestedEnum.ESTED_NOTHING)
-      .addRnestedEnum(SimpleMessageRepeated.NestedEnum.NESTED_FIRST)
       .build()
 
     val df = Seq(simpleMessage.toByteArray).toDF("value")
@@ -60,6 +58,31 @@ class ProtoFunctionsSuite extends QueryTest with SharedSparkSession with Seriali
     dfRes3.printSchema()
   }
 
+  test("roundtrip in to_proto - struct") {
+    val messagePath = testFile("protobuf/simple_message.desc").replace("file:/", "/")
+    val df = spark.range(10).select(
+      struct(
+        $"id",
+        $"id".cast(org.apache.spark.sql.types.StringType).as("string_value"),
+        $"id".cast(org.apache.spark.sql.types.IntegerType).as("int32_value"),
+        $"id".cast(org.apache.spark.sql.types.IntegerType).as("uint32_value"),
+        $"id".cast(org.apache.spark.sql.types.LongType).as("int64_value"),
+        $"id".cast(org.apache.spark.sql.types.LongType).as("uint64_value"),
+        $"id".cast(org.apache.spark.sql.types.DoubleType).as("double_value"),
+        lit(1202.00).cast(org.apache.spark.sql.types.FloatType).as("float_value"),
+        lit(true).as("bool_value"),
+        lit("0".getBytes).as("bytes_value")
+      ).as("SimpleMessage")
+    )
+    val protoStructDF = df.select(functions.to_proto($"SimpleMessage").as("proto"))
+    df.collect().foreach(f => print(f))
+    df.printSchema()
+    val actualDf = protoStructDF.select(functions.from_proto($"proto", messagePath, "SimpleMessage").as("SimpleMessage"))
+    actualDf.collect().foreach(f => print(f))
+    actualDf.printSchema()
+    checkAnswer(actualDf, df)
+  }
+
   test("roundtrip in to_proto and from_proto - struct") {
     val messagePath = testFile("protobuf/simple_message.desc").replace("file:/", "/")
     val df = spark.range(10).select(
@@ -68,14 +91,8 @@ class ProtoFunctionsSuite extends QueryTest with SharedSparkSession with Seriali
         $"id".cast("string").as("string_value"),
         $"id".cast("int").as("int32_value"),
         $"id".cast("int").as("uint32_value"),
-        $"id".cast("int").as("sint32_value"),
-        $"id".cast("int").as("fixed32_value"),
-        $"id".cast("int").as("sfixed32_value"),
         $"id".cast("long").as("int64_value"),
         $"id".cast("long").as("uint64_value"),
-        $"id".cast("long").as("sint64_value"),
-        $"id".cast("long").as("fixed64_value"),
-        $"id".cast("long").as("sfixed64_value"),
         $"id".cast("double").as("double_value"),
         lit(1202.00).cast(org.apache.spark.sql.types.FloatType).as("float_value"),
         lit(true).as("bool_value"),
@@ -92,18 +109,21 @@ class ProtoFunctionsSuite extends QueryTest with SharedSparkSession with Seriali
     val repeatedMessage = SimpleMessageRepeated.newBuilder()
       .setKey("key")
       .setValue("value")
+      .addRstringValue("array_string_value")
+      .addRint32Value(1092)
+      .addRint64Value(1090902)
+      .addRbytesValue(com.google.protobuf.ByteString.copyFrom("0".getBytes))
       .addRboolValue(false)
       .addRboolValue(true)
       .addRdoubleValue(1092092)
       .addRdoubleValue(1092093)
       .addRfloatValue(10903.0f)
       .addRfloatValue(10902.0f)
-      .addRnestedEnum(SimpleMessageRepeated.NestedEnum.ESTED_NOTHING)
-      .addRnestedEnum(SimpleMessageRepeated.NestedEnum.NESTED_FIRST)
       .build()
+
     val df = Seq(repeatedMessage.toByteArray).toDF("value")
     val fromProtoDF = df.select(functions.from_proto($"value", messagePath, "SimpleMessageRepeated").as("value_from"))
-    val toProtoDF = fromProtoDF.select(functions.to_proto($"value_from", messagePath, "SimpleMessageRepeated").as("value_to"))
+    val toProtoDF = fromProtoDF.select(functions.to_proto($"value_from").as("value_to"))
     val toFromProtoDF = toProtoDF.select(functions.from_proto($"value_to", messagePath, "SimpleMessageRepeated").as("value_to_from"))
     checkAnswer(fromProtoDF.select($"value_from.*"), toFromProtoDF.select($"value_to_from.*"))
   }

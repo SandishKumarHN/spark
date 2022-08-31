@@ -10,11 +10,6 @@ option java_outer_classname = "SimpleMessageRepeatedProtos";
 message SimpleMessageRepeated {
   string key = 1;
   string value = 2;
-  enum NestedEnum {
-    ESTED_NOTHING = 0;
-    NESTED_FIRST = 1;
-    NESTED_SECOND = 2;
-  }
   repeated string rstring_value = 3;
   repeated int32 rint32_value = 4;
   repeated bool rbool_value = 5;
@@ -22,5 +17,4 @@ message SimpleMessageRepeated {
   repeated float rfloat_value = 7;
   repeated double rdouble_value = 8;
   repeated bytes rbytes_value = 9;
-  repeated NestedEnum rnested_enum = 10;
 }

@@ -33,6 +33,10 @@ private[proto] case class ProtoDataToCatalyst(child: Expression, descFilePath: S
 
   override def inputTypes: Seq[AbstractDataType] = Seq(BinaryType)
 
+  @transient private lazy val descriptor = ProtoUtils.buildDescriptor(descFilePath, messageName)
+
+  @transient private lazy val expectedSchema = protoOptions.schema.getOrElse(descriptor)
+
   override lazy val dataType: DataType = {
     val dt = SchemaConverters.toSqlType(expectedSchema).dataType
     parseMode match {
@@ -47,10 +51,6 @@ private[proto] case class ProtoDataToCatalyst(child: Expression, descFilePath: S
   override def nullable: Boolean = true
 
   private lazy val protoOptions = ProtoOptions(options)
-
-  @transient private lazy val descriptor = ProtoUtils.buildDescriptor(descFilePath, messageName)
-
-  @transient private lazy val expectedSchema = protoOptions.schema.getOrElse(descriptor)
 
   @transient private lazy val deserializer = new ProtoDeserializer(expectedSchema, dataType, protoOptions.datetimeRebaseModeInRead)
 

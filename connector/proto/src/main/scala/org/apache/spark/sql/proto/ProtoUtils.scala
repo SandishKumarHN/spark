@@ -238,9 +238,9 @@ private[sql] object ProtoUtils extends Logging {
 
   def buildDescriptor(protoFilePath: String, messageName: String): Descriptor = {
     val fileDescriptor: Descriptors.FileDescriptor = parseFileDescriptor(protoFilePath)
-    var result: Descriptors.Descriptor  = null;
+    var result: Descriptors.Descriptor = null;
 
-    for(descriptor <- fileDescriptor.getMessageTypes.asScala) {
+    for (descriptor <- fileDescriptor.getMessageTypes.asScala) {
       if (descriptor.getName().equals(messageName)) {
         result = descriptor
       }
@@ -289,6 +289,6 @@ private[sql] object ProtoUtils extends Logging {
 
   /** Return true iff `protoField` is nullable, i.e. `UNION` type and has `NULL` as an option. */
   private[proto] def isNullable(protoField: FieldDescriptor): Boolean =
-    !protoField.isOptional
+    protoField.isOptional
 
 }

@@ -112,7 +112,7 @@ private[sql] class ProtoSerializer(
         }
 
       case (BinaryType, BYTE_STRING) =>
-        (getter, ordinal) => getter.getBinary(ordinal)
+        (getter, ordinal) => com.google.protobuf.ByteString.copyFrom(getter.getBinary(ordinal))
 
       case (DateType, INT) =>
         (getter, ordinal) => getter.getInt(ordinal)
