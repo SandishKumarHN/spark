@@ -61,6 +61,25 @@ object SchemaConverters {
       case STRING => Some(StringType)
       case BYTE_STRING => Some(BinaryType)
       case ENUM => Some(StringType)
+      case MESSAGE if fd.getMessageType.getOptions.getMapEntry =>
+        var keyType: DataType = NullType
+        var valueType: DataType = NullType
+        fd.getMessageType.getFields.forEach {
+          field =>
+            field.getName match {
+              case "key" =>
+                val spField = structFieldFor(field)
+                // keyValueType = (spField.get.dataType, NullType)
+                keyType = spField.get.dataType
+              case "value" =>
+                val spField = structFieldFor(field)
+                valueType = spField.get.dataType
+                //keyValueType = (spField.get.dataType, NullType)
+            }
+        }
+        return Option(StructField(fd.getName,
+          MapType(keyType, valueType, valueContainsNull = false),
+          nullable = false))
       case MESSAGE =>
         Option(fd.getMessageType.getFields.asScala.flatMap(structFieldFor).toSeq)
           .filter(_.nonEmpty)
@@ -69,6 +88,7 @@ object SchemaConverters {
       case _ =>
         None
     }
+
     dataType.map(dt => StructField(
       fd.getName,
       if (fd.isRepeated) ArrayType(dt, containsNull = false) else dt,

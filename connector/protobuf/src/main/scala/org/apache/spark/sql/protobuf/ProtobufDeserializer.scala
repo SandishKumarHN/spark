@@ -16,13 +16,13 @@
  */
 package org.apache.spark.sql.protobuf
 
+import scala.collection.JavaConverters._
 import com.google.protobuf.{ByteString, DynamicMessage}
 import com.google.protobuf.Descriptors._
 import com.google.protobuf.Descriptors.FieldDescriptor.JavaType._
-
 import org.apache.spark.sql.catalyst.{InternalRow, NoopFilters, StructFilters}
 import org.apache.spark.sql.catalyst.expressions.{SpecificInternalRow, UnsafeArrayData}
-import org.apache.spark.sql.catalyst.util.{ArrayData, GenericArrayData}
+import org.apache.spark.sql.catalyst.util.{ArrayBasedMapData, ArrayData, GenericArrayData}
 import org.apache.spark.sql.catalyst.util.RebaseDateTime.RebaseSpec
 import org.apache.spark.sql.execution.datasources.DataSourceUtils
 import org.apache.spark.sql.internal.SQLConf.LegacyBehaviorPolicy
@@ -30,10 +30,10 @@ import org.apache.spark.sql.protobuf.utils.ProtobufUtils
 import org.apache.spark.sql.protobuf.utils.ProtobufUtils.ProtoMatchedField
 import org.apache.spark.sql.protobuf.utils.ProtobufUtils.toFieldStr
 import org.apache.spark.sql.protobuf.utils.SchemaConverters.IncompatibleSchemaException
-import org.apache.spark.sql.types.{ArrayType, BinaryType, BooleanType, ByteType, DataType,
-  DateType, Decimal, DoubleType, FloatType, IntegerType, LongType, NullType,
-  ShortType, StringType, StructType}
+import org.apache.spark.sql.types.{ArrayType, BinaryType, BooleanType, ByteType, DataType, DateType, Decimal, DoubleType, FloatType, IntegerType, LongType, MapType, NullType, ShortType, StringType, StructType}
 import org.apache.spark.unsafe.types.UTF8String
+
+import scala.collection.mutable
 
 private[sql] class ProtobufDeserializer(
                                       rootProtoType: Descriptor,
@@ -118,6 +118,50 @@ private[sql] class ProtobufDeserializer(
       updater.set(ordinal, result)
   }
 
+  private def newMapWriter(
+    protoType: FieldDescriptor,
+    catalystType: DataType,
+    protoPath: Seq[String],
+    catalystPath: Seq[String],
+    keyType: DataType,
+    valueType: DataType,
+    valueContainsNull: Boolean): (CatalystDataUpdater, Int, Any) => Unit = {
+    val fieldDescriptors = new mutable.HashMap[String, FieldDescriptor]()
+
+    protoType.getMessageType.getFields.asScala.map {
+      field => field.getName match {
+        case "key" =>
+          fieldDescriptors.put("key",
+            field.getContainingType.findFieldByName("key"))
+        case "value" =>
+          fieldDescriptors.put("value",
+          field.getContainingType.findFieldByName("value"))
+      }
+    }
+
+    val keyWriter = newWriter(fieldDescriptors.get("key").get, keyType,
+      protoPath :+ "key", catalystPath :+ "key")
+    val valueWriter = newWriter(fieldDescriptors.get("value").get, valueType,
+      protoPath :+ "value", catalystPath :+ "value")
+    (updater, ordinal, value) =>
+      val kvList = value.asInstanceOf[java.util.List[AnyRef]]
+      val keyArray = createArrayData(keyType, kvList.size())
+      val keyUpdater = new ArrayDataUpdater(keyArray)
+      val valueArray = createArrayData(valueType, kvList.size())
+      val valueUpdater = new ArrayDataUpdater(valueArray)
+
+      val iter = kvList.iterator()
+      var i = 0
+
+      while (iter.hasNext) {
+        val kv = iter.next()
+        val keyValue = kv.asInstanceOf[DynamicMessage].getAllFields.values().toArray()
+        keyWriter(keyUpdater, i, keyValue(0))
+        valueWriter(valueUpdater, i, keyValue(1))
+      }
+      updater.set(ordinal, new ArrayBasedMapData(keyArray, valueArray))
+  }
+
   /**
    * Creates a writer to write Protobuf values to Catalyst values at the given ordinal with
    * the given updater.
@@ -197,6 +241,10 @@ private[sql] class ProtobufDeserializer(
       case (BYTE_STRING, ArrayType(BinaryType, containsNull)) =>
         newArrayWriter(protoType, protoPath,
           catalystPath, BinaryType, containsNull)
+
+      case(MESSAGE, MapType(keyType, valueType, valueContainsNull)) =>
+        newMapWriter(protoType, catalystType, protoPath, catalystPath,
+          keyType, valueType, valueContainsNull)
 
       case (MESSAGE, st: StructType) =>
         val writeRecord = getRecordWriter(protoType.getMessageType, st, protoPath,
@@ -320,6 +368,7 @@ private[sql] class ProtobufDeserializer(
 
     override def setDecimal(ordinal: Int, value: Decimal): Unit =
       row.setDecimal(ordinal, value, value.precision)
+
   }
 
   final class ArrayDataUpdater(array: ArrayData) extends CatalystDataUpdater {
