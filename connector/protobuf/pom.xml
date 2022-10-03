@@ -26,6 +26,15 @@
   </parent>
 
   <artifactId>spark-protobuf_2.12</artifactId>
+
+  <repositories>
+    <repository>
+      <id> confluent </id>
+      <name> confluent </name>
+      <url> https://packages.confluent.io/maven/</url>
+    </repository>
+  </repositories>
+
   <properties>
     <sbt.project.name>protobuf</sbt.project.name>
     <protobuf.version>3.21.1</protobuf.version>
@@ -66,6 +75,11 @@
       <groupId>org.scalacheck</groupId>
       <artifactId>scalacheck_${scala.binary.version}</artifactId>
       <scope>test</scope>
+    </dependency>
+    <dependency>
+        <groupId>io.confluent</groupId>
+        <artifactId>kafka-protobuf-serializer</artifactId>
+        <version>7.2.0</version>
     </dependency>
     <dependency>
       <groupId>org.apache.spark</groupId>

@@ -18,8 +18,15 @@ package org.apache.spark.sql.protobuf
 
 import scala.collection.JavaConverters._
 import scala.util.control.NonFatal
+import scala.collection.mutable
+
+import java.nio.ByteBuffer
 
 import com.google.protobuf.DynamicMessage
+import com.google.protobuf.Descriptors.Descriptor
+import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient
+import io.confluent.kafka.schemaregistry.protobuf.{MessageIndexes, ProtobufSchema}
+import org.apache.kafka.common.errors.SerializationException
 
 import org.apache.spark.SparkException
 import org.apache.spark.sql.AnalysisException
@@ -31,7 +38,9 @@ import org.apache.spark.sql.types.{AbstractDataType, BinaryType, DataType, Struc
 
 private[protobuf] case class ProtobufDataToCatalyst(child: Expression, descFilePath: String,
                                                  messageName: String,
-                                                 options: Map[String, String])
+                                                 options: Map[String, String],
+                                                 schemaRegistryURLs: Option[String],
+                                                 subject: Option[String])
   extends UnaryExpression with ExpectsInputTypes {
 
   override def inputTypes: Seq[AbstractDataType] = Seq(BinaryType)
@@ -51,12 +60,26 @@ private[protobuf] case class ProtobufDataToCatalyst(child: Expression, descFileP
 
   private lazy val protobufOptions = ProtobufOptions(options)
 
+  @transient private lazy val cachedSchemaRegistry = {
+    schemaRegistryURLs match {
+      case urls =>
+        new CachedSchemaRegistryClient(urls.get.split(",").toList.asJava,
+        128)
+    }
+  }
+
   @transient private lazy val expectedSchema =
     ProtobufUtils.buildDescriptor(descFilePath, messageName)
 
   @transient private lazy val deserializer = new ProtobufDeserializer(expectedSchema, dataType)
 
   @transient private var result: DynamicMessage = _
+
+  @transient private lazy val MAGIC_BYTE = 0x0
+
+  @transient private lazy val SCHEMA_ID_SIZE_BYTES = 4
+
+  @transient private lazy val schemaCache = new mutable.HashMap[Tuple2[String, Int], ProtobufSchema]
 
   @transient private lazy val parseMode: ParseMode = {
     val mode = protobufOptions.parseMode
@@ -146,4 +169,22 @@ private[protobuf] case class ProtobufDataToCatalyst(child: Expression, descFileP
 
   override protected def withNewChildInternal(newChild: Expression): ProtobufDataToCatalyst =
     copy(child = newChild)
+
+  protected def extractDescriptorFromSchemaRegsirty(payload: Array[Byte]):
+  (Descriptor, Int, Int) = {
+    val buffer = ByteBuffer.wrap(payload)
+    if (buffer.get() != MAGIC_BYTE) {
+      throw new SerializationException("Unknown magic byte!")
+    }
+    val schemaId = buffer.getInt()
+    val indexes = MessageIndexes.readFrom(buffer)
+    val length = buffer.limit() - 1 - SCHEMA_ID_SIZE_BYTES
+    val start = buffer.position() + buffer.arrayOffset()
+
+    val descriptor = SchemaConverters.descriptorFromSchemaRegistry(cachedSchemaRegistry,
+      subject, schemaId)
+
+    (descriptor, start, length)
+  }
+
 }

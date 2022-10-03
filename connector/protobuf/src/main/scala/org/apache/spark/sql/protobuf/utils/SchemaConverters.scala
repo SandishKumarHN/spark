@@ -17,10 +17,11 @@
 package org.apache.spark.sql.protobuf.utils
 
 import java.util
-
 import scala.collection.JavaConverters._
 
 import com.google.protobuf.Descriptors.{Descriptor, FieldDescriptor}
+import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient
+import io.confluent.kafka.schemaregistry.protobuf.ProtobufSchema
 
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.sql.protobuf.ScalaReflectionLock
@@ -49,6 +50,12 @@ object SchemaConverters {
     SchemaType(StructType(descriptor.getFields.asScala.flatMap(
       structFieldFor(_, Set.empty)).toSeq),
       nullable = true)
+  }
+
+  def descriptorFromSchemaRegistry(cachedSchemaRegistry: CachedSchemaRegistryClient,
+                                             subject: String, schemaId: Int): Descriptor = {
+    cachedSchemaRegistry.getSchemaBySubjectAndId(subject,
+      schemaId).asInstanceOf[ProtobufSchema].toDescriptor()
   }
 
   def structFieldFor(fd: FieldDescriptor, existingRecordNames: Set[String]): Option[StructField] = {
@@ -98,10 +105,6 @@ object SchemaConverters {
       nullable = !fd.isRequired && !fd.isRepeated
     ))
   }
-
-  case class ProtoMessage(messageName: String, fieldList: util.ArrayList[ProtoField])
-
-  case class ProtoField(name: String, catalystType: DataType)
 
   private[protobuf] class IncompatibleSchemaException(
                                                     msg: String,

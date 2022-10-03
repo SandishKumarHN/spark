@@ -16,26 +16,44 @@
  */
 package org.apache.spark.sql.protobuf
 
+import scala.collection.JavaConverters._
+import scala.collection.mutable
+import java.nio.ByteBuffer
+import java.io.ByteArrayInputStream
+import com.google.protobuf.Descriptors.Descriptor
 import com.google.protobuf.DynamicMessage
-
+import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient
+import io.confluent.kafka.schemaregistry.protobuf.{MessageIndexes, ProtobufSchema}
+import org.apache.kafka.common.errors.SerializationException
 import org.apache.spark.sql.catalyst.expressions.{Expression, UnaryExpression}
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
-import org.apache.spark.sql.protobuf.utils.ProtobufUtils
+import org.apache.spark.sql.protobuf.utils.{ProtobufUtils, SchemaConverters}
 import org.apache.spark.sql.types.{BinaryType, DataType}
 
 private[protobuf] case class CatalystDataToProtobuf(
                                                child: Expression,
                                                descFilePath: String,
-                                               messageName: String)
+                                               messageName: String,
+                                               schemaRegistryURLs: Option[String],
+                                               subject: Option[String])
   extends UnaryExpression {
 
   override def dataType: DataType = BinaryType
 
-  @transient private lazy val protoType =
-    ProtobufUtils.buildDescriptor(descFilePath, messageName)
+  @transient private lazy val protoType = (schemaRegistryURLs, subject) match {
+    case (Some(url), Some(subject)) =>
+      lazy val cachedSchemaRegistry =
+        new CachedSchemaRegistryClient(url.split(",").toList.asJava, 128)
+      SchemaConverters.descriptorFromSchemaRegistry(cachedSchemaRegistry, subject, 0)
+    case _ => ProtobufUtils.buildDescriptor(descFilePath, messageName)
+  }
 
   @transient private lazy val serializer = new ProtobufSerializer(child.dataType, protoType,
     child.nullable)
+
+  @transient private lazy val MAGIC_BYTE = 0x0
+
+  @transient private lazy val SCHEMA_ID_SIZE_BYTES = 4
 
   override def nullSafeEval(input: Any): Any = {
     val dynamicMessage = serializer.serialize(input).asInstanceOf[DynamicMessage]
