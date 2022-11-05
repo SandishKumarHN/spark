@@ -131,8 +131,9 @@ class ProtobufCatalystDataConversionSuite
       val rand = new scala.util.Random(seed)
       val generator = RandomDataGenerator.forType(dt, rand = rand).get
       var data = generator()
-      while (data.asInstanceOf[Row].get(0) == defaultValue) // Do not use default values, since
-        data = generator()                                  // from_protobuf() returns null in v3.
+      // Do not use default values, since from_protobuf() returns null in v3.
+      while (data != null && data.asInstanceOf[Row].get(0) == defaultValue)
+        data = generator()
 
       val converter = CatalystTypeConverters.createToCatalystConverter(dt)
       val input = Literal.create(converter(data), dt)
