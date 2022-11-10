@@ -48,12 +48,6 @@
     ],
     "sqlState" : "42000"
   },
-  "CANNOT_INFER_DATE" : {
-    "message" : [
-      "Cannot infer date in schema inference when LegacyTimeParserPolicy is \"LEGACY\". Legacy Date formatter does not support strict date format matching which is required to avoid inferring timestamps and other non-date entries to date."
-    ],
-    "sqlState" : "22007"
-  },
   "CANNOT_LOAD_PROTOBUF_CLASS" : {
     "message" : [
       "Could not load Protobuf class with name <protobufClassName>. Ensure the class name includes package prefix."
@@ -215,11 +209,6 @@
           "Input to <functionName> should all be the same type, but it's <dataType>."
         ]
       },
-      "FRAME_LESS_OFFSET_WITHOUT_FOLDABLE" : {
-        "message" : [
-          "Offset expression <offset> must be a literal."
-        ]
-      },
       "HASH_MAP_TYPE" : {
         "message" : [
           "Input to the function <functionName> cannot contain elements of the \"MAP\" type. In Spark, same maps may have different hashcode, thus hash expressions are prohibited on \"MAP\" elements. To restore previous behavior set \"spark.sql.legacy.allowHashOnMapType\" to \"true\"."
@@ -263,11 +252,6 @@
       "MAP_CONTAINS_KEY_DIFF_TYPES" : {
         "message" : [
           "Input to <functionName> should have been <dataType> followed by a value with same key type, but it's [<leftType>, <rightType>]."
-        ]
-      },
-      "MAP_FROM_ENTRIES_WRONG_TYPE" : {
-        "message" : [
-          "The <functionName> accepts only arrays of pair structs, but <childExpr> is of <childType>."
         ]
       },
       "MAP_ZIP_WITH_DIFF_TYPES" : {
@@ -370,6 +354,11 @@
           "Cannot use an UnspecifiedFrame. This should have been converted during analysis."
         ]
       },
+      "UNSUPPORTED_INPUT_TYPE" : {
+        "message" : [
+          "The input of <functionName> can't be <dataType> type data."
+        ]
+      },
       "VALUE_OUT_OF_RANGE" : {
         "message" : [
           "The <exprName> must be between <valueRange> (current value = <currentValue>)"
@@ -380,12 +369,24 @@
           "The <functionName> requires <expectedNum> parameters but the actual number is <actualNum>."
         ]
       },
+      "WRONG_NUM_ARGS_WITH_SUGGESTION" : {
+        "message" : [
+          "The <functionName> requires <expectedNum> parameters but the actual number is <actualNum>.",
+          "If you have to call this function with <legacyNum> parameters, set the legacy configuration <legacyConfKey> to <legacyConfValue>."
+        ]
+      },
       "WRONG_NUM_ENDPOINTS" : {
         "message" : [
           "The number of endpoints must be >= 2 to construct intervals but the actual number is <actualNumber>."
         ]
       }
     }
+  },
+  "DATATYPE_MISSING_SIZE" : {
+    "message" : [
+      "DataType <type> requires a length parameter, for example <type>(10). Please specify the length."
+    ],
+    "sqlState" : "42000"
   },
   "DATETIME_OVERFLOW" : {
     "message" : [
@@ -466,6 +467,11 @@
   "GROUPING_SIZE_LIMIT_EXCEEDED" : {
     "message" : [
       "Grouping sets size cannot be greater than <maxSize>"
+    ]
+  },
+  "GROUP_BY_AGGREGATE" : {
+    "message" : [
+      "Aggregate functions are not allowed in GROUP BY, but found <sqlExpr>."
     ]
   },
   "GROUP_BY_POS_OUT_OF_RANGE" : {
@@ -668,6 +674,11 @@
       }
     }
   },
+  "LOCATION_ALREADY_EXISTS" : {
+    "message" : [
+      "Cannot name the managed table as <identifier>, as its associated location <location> already exists. Please pick a different table name, or remove the existing location first."
+    ]
+  },
   "MALFORMED_PROTOBUF_MESSAGE" : {
     "message" : [
       "Malformed Protobuf messages are detected in message deserialization. Parse Mode: <failFastMode>. To process malformed protobuf message as null result, try setting the option 'mode' as 'PERMISSIVE'."
@@ -682,11 +693,6 @@
   "MULTI_UDF_INTERFACE_ERROR" : {
     "message" : [
       "Not allowed to implement multiple UDF interfaces, UDF class <className>"
-    ]
-  },
-  "MULTI_VALUE_SUBQUERY_ERROR" : {
-    "message" : [
-      "More than one row returned by a subquery used as an expression."
     ]
   },
   "NON_LAST_MATCHED_CLAUSE_OMIT_CONDITION" : {
@@ -757,6 +763,11 @@
     ],
     "sqlState" : "22005"
   },
+  "NUM_COLUMNS_MISMATCH" : {
+    "message" : [
+      "<operator> can only be performed on tables with the same number of columns, but the first table has <refNumColumns> columns and the <invalidOrdinalNum> table has <invalidNumColumns> columns."
+    ]
+  },
   "ORDER_BY_POS_OUT_OF_RANGE" : {
     "message" : [
       "ORDER BY position <index> is not in select list (valid range is [1, <size>])."
@@ -767,12 +778,6 @@
     "message" : [
       "Out of decimal type range: <value>."
     ]
-  },
-  "PARSE_CHAR_MISSING_LENGTH" : {
-    "message" : [
-      "DataType <type> requires a length parameter, for example <type>(10). Please specify the length."
-    ],
-    "sqlState" : "42000"
   },
   "PARSE_EMPTY_STATEMENT" : {
     "message" : [
@@ -873,6 +878,11 @@
     ],
     "sqlState" : "42000"
   },
+  "SCALAR_SUBQUERY_TOO_MANY_ROWS" : {
+    "message" : [
+      "More than one row returned by a subquery used as an expression."
+    ]
+  },
   "SCHEMA_ALREADY_EXISTS" : {
     "message" : [
       "Cannot create schema <schemaName> because it already exists.",
@@ -900,6 +910,11 @@
       "The second argument of <functionName> function needs to be an integer."
     ],
     "sqlState" : "22023"
+  },
+  "STAR_GROUP_BY_POS" : {
+    "message" : [
+      "Star (*) is not allowed in a select list when GROUP BY an ordinal position is used."
+    ]
   },
   "TABLE_OR_VIEW_ALREADY_EXISTS" : {
     "message" : [
@@ -936,6 +951,11 @@
   "UNABLE_TO_CONVERT_TO_PROTOBUF_MESSAGE_TYPE" : {
     "message" : [
       "Unable to convert SQL type <toType> to Protobuf type <protobufType>."
+    ]
+  },
+  "UNCLOSED_BRACKETED_COMMENT" : {
+    "message" : [
+      "Found an unclosed bracketed comment. Please, append */ at the end of the comment."
     ]
   },
   "UNKNOWN_PROTOBUF_MESSAGE_TYPE" : {
@@ -1567,11 +1587,6 @@
       "It is not allowed to add database prefix `<database>` for the TEMPORARY view name."
     ]
   },
-  "_LEGACY_ERROR_TEMP_0055" : {
-    "message" : [
-      "Unclosed bracketed comment"
-    ]
-  },
   "_LEGACY_ERROR_TEMP_0056" : {
     "message" : [
       "Invalid time travel spec: <reason>."
@@ -1711,11 +1726,6 @@
   "_LEGACY_ERROR_TEMP_1018" : {
     "message" : [
       "<quoted> is a permanent view, which is not supported by streaming reading API such as `DataStreamReader.table` yet."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_1019" : {
-    "message" : [
-      "Star (*) is not allowed in select list when GROUP BY ordinal position is used"
     ]
   },
   "_LEGACY_ERROR_TEMP_1020" : {
@@ -1947,11 +1957,6 @@
   "_LEGACY_ERROR_TEMP_1069" : {
     "message" : [
       "CREATE EXTERNAL TABLE must be accompanied by LOCATION."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_1070" : {
-    "message" : [
-      "Can not <methodName> the managed table('<tableIdentifier>'). The associated location('<tableLocation>') already exists."
     ]
   },
   "_LEGACY_ERROR_TEMP_1071" : {
@@ -2970,11 +2975,6 @@
   "_LEGACY_ERROR_TEMP_1278" : {
     "message" : [
       "<name> is not a view."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_1279" : {
-    "message" : [
-      "View <name> already exists. If you want to update the view definition, please use ALTER VIEW AS or CREATE OR REPLACE VIEW AS."
     ]
   },
   "_LEGACY_ERROR_TEMP_1280" : {
@@ -5013,11 +5013,6 @@
       "Correlated scalar subquery '<sqlExpr>' is neither present in the group by, nor in an aggregate function. Add it to group by using ordinal position or wrap it in first() (or first_value) if you don't care which value you get."
     ]
   },
-  "_LEGACY_ERROR_TEMP_2424" : {
-    "message" : [
-      "aggregate functions are not allowed in GROUP BY, but found <sqlExpr>"
-    ]
-  },
   "_LEGACY_ERROR_TEMP_2425" : {
     "message" : [
       "expression <sqlExpr> cannot be used as a grouping expression because its data type <dataType> is not an orderable data type."
@@ -5036,11 +5031,6 @@
   "_LEGACY_ERROR_TEMP_2428" : {
     "message" : [
       "The sum of the LIMIT clause and the OFFSET clause must not be greater than the maximum 32-bit integer value (2,147,483,647) but found limit = <limit>, offset = <offset>."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_2429" : {
-    "message" : [
-      "<operator> can only be performed on tables with the same number of columns, but the first table has <firstColNum> columns and the <nTab> table has <nColNum> columns."
     ]
   },
   "_LEGACY_ERROR_TEMP_2430" : {

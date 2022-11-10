@@ -18,7 +18,7 @@ package org.apache.spark.sql.connect.planner
 
 import org.apache.spark.connect.proto
 import org.apache.spark.connect.proto.Join.JoinType
-import org.apache.spark.sql.{Column, DataFrame, Row}
+import org.apache.spark.sql.{AnalysisException, Column, DataFrame, Row}
 import org.apache.spark.sql.catalyst.analysis
 import org.apache.spark.sql.catalyst.expressions.AttributeReference
 import org.apache.spark.sql.catalyst.plans.{FullOuter, Inner, LeftAnti, LeftOuter, LeftSemi, PlanTest, RightOuter}
@@ -27,6 +27,7 @@ import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connect.dsl.MockRemoteSession
 import org.apache.spark.sql.connect.dsl.expressions._
 import org.apache.spark.sql.connect.dsl.plans._
+import org.apache.spark.sql.functions._
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
 
@@ -59,6 +60,12 @@ class SparkConnectProtoSuite extends PlanTest with SparkConnectPlanTest {
   test("Basic select") {
     val connectPlan = connectTestRelation.select("id".protoAttr)
     val sparkPlan = sparkTestRelation.select("id")
+    comparePlans(connectPlan, sparkPlan)
+  }
+
+  test("Test select expression in strings") {
+    val connectPlan = connectTestRelation.selectExpr("abs(id)", "name")
+    val sparkPlan = sparkTestRelation.selectExpr("abs(id)", "name")
     comparePlans(connectPlan, sparkPlan)
   }
 
@@ -141,6 +148,22 @@ class SparkConnectProtoSuite extends PlanTest with SparkConnectPlanTest {
       val sparkPlan =
         sparkTestRelation.groupBy(Column("id"), Column("name")).agg(Map.empty[String, String])
       comparePlans(connectPlan, sparkPlan)
+    }
+  }
+
+  test("Aggregate expressions") {
+    withSQLConf(SQLConf.DATAFRAME_RETAIN_GROUP_COLUMNS.key -> "false") {
+      val connectPlan =
+        connectTestRelation.groupBy("id".protoAttr)(proto_min("name".protoAttr))
+      val sparkPlan =
+        sparkTestRelation.groupBy(Column("id")).agg(min(Column("name")))
+      comparePlans(connectPlan, sparkPlan)
+
+      val connectPlan2 =
+        connectTestRelation.groupBy("id".protoAttr)(proto_min("name".protoAttr).as("agg1"))
+      val sparkPlan2 =
+        sparkTestRelation.groupBy(Column("id")).agg(min(Column("name")).as("agg1"))
+      comparePlans(connectPlan2, sparkPlan2)
     }
   }
 
@@ -232,6 +255,52 @@ class SparkConnectProtoSuite extends PlanTest with SparkConnectPlanTest {
 
   test("Test Session.sql") {
     comparePlans(connect.sql("SELECT 1"), spark.sql("SELECT 1"))
+  }
+
+  test("Test Repartition") {
+    val connectPlan1 = connectTestRelation.repartition(12)
+    val sparkPlan1 = sparkTestRelation.repartition(12)
+    comparePlans(connectPlan1, sparkPlan1)
+
+    val connectPlan2 = connectTestRelation.coalesce(2)
+    val sparkPlan2 = sparkTestRelation.coalesce(2)
+    comparePlans(connectPlan2, sparkPlan2)
+  }
+
+  test("Test summary") {
+    comparePlans(
+      connectTestRelation.summary("count", "mean", "stddev"),
+      sparkTestRelation.summary("count", "mean", "stddev"))
+  }
+
+  test("Test crosstab") {
+    comparePlans(
+      connectTestRelation.stat.crosstab("id", "name"),
+      sparkTestRelation.stat.crosstab("id", "name"))
+  }
+
+  test("Test toDF") {
+    comparePlans(connectTestRelation.toDF("col1", "col2"), sparkTestRelation.toDF("col1", "col2"))
+  }
+
+  test("Test withColumnsRenamed") {
+    comparePlans(
+      connectTestRelation.withColumnsRenamed(Map("id" -> "id1")),
+      sparkTestRelation.withColumnsRenamed(Map("id" -> "id1")))
+    comparePlans(
+      connectTestRelation.withColumnsRenamed(Map("id" -> "id1", "name" -> "name1")),
+      sparkTestRelation.withColumnsRenamed(Map("id" -> "id1", "name" -> "name1")))
+    comparePlans(
+      connectTestRelation.withColumnsRenamed(Map("id" -> "id1", "col1" -> "col2")),
+      sparkTestRelation.withColumnsRenamed(Map("id" -> "id1", "col1" -> "col2")))
+    comparePlans(
+      connectTestRelation.withColumnsRenamed(Map("id" -> "id1", "id" -> "id2")),
+      sparkTestRelation.withColumnsRenamed(Map("id" -> "id1", "id" -> "id2")))
+
+    val e = intercept[AnalysisException](
+      transform(connectTestRelation.withColumnsRenamed(
+        Map("id" -> "duplicatedCol", "name" -> "duplicatedCol"))))
+    assert(e.getMessage.contains("Found duplicate column(s)"))
   }
 
   private def createLocalRelationProtoByQualifiedAttributes(
