@@ -109,6 +109,59 @@ def from_protobuf(
         raise
     return Column(jc)
 
+def from_protobuf(
+        data: "ColumnOrName",
+        messageClassName: str
+) -> Column:
+    """
+    Converts a binary column of Protobuf format into its corresponding catalyst value.
+    The specified schema must match the read data, otherwise the behavior is undefined:
+    it may fail or return arbitrary result.
+    To deserialize the data with a compatible and evolved schema, the expected
+    Protobuf schema can be set via the option protobuf descriptor.
+
+    .. versionadded:: 3.4.0
+
+    Parameters
+    ----------
+    data : :class:`~pyspark.sql.Column` or str
+        the binary column.
+    messageClassName: str
+        The Protobuf class name. E.g. <code>org.spark.examples.protobuf.ExampleEvent</code>.
+        Using the spark-submit option --jars, add a messageClassName specific jar.
+
+    Notes
+    -----
+    Protobuf functionality is provided as an pluggable external module.
+
+    Examples
+    --------
+    >>> data = [([(1668035962, 2020)])]
+    >>> ddl_schema = "value struct<seconds: LONG, nanos: INT>"
+    >>> df = spark.createDataFrame(data, ddl_schema)
+    >>> message_class_name = "org.sparkproject.spark-protobuf.protobuf.Timestamp"
+    >>> to_proto_df = df.select(to_protobuf(df.value, message_class_name).alias("value"))
+    >>> from_proto_df = to_proto_df.select(
+    ...     from_protobuf(to_proto_df.value, message_class_name).alias("value"))
+    >>> from_proto_df.show(truncate=False)
+    +------------------+
+    |value             |
+    +------------------+
+    |{1668035962, 2020}|
+    +------------------+
+    """
+
+    sc = SparkContext._active_spark_context
+    assert sc is not None and sc._jvm is not None
+    try:
+        jc = sc._jvm.org.apache.spark.sql.protobuf.functions.from_protobuf(
+            _to_java_column(data), messageClassName
+        )
+    except TypeError as e:
+        if str(e) == "'JavaPackage' object is not callable":
+            _print_missing_jar("Protobuf", "protobuf", "protobuf", sc.version)
+        raise
+    return Column(jc)
 
 def to_protobuf(data: "ColumnOrName", messageName: str, descFilePath: str) -> Column:
     """
@@ -170,6 +223,49 @@ def to_protobuf(data: "ColumnOrName", messageName: str, descFilePath: str) -> Co
         raise
     return Column(jc)
 
+def to_protobuf(data: "ColumnOrName", messageClassName: str) -> Column:
+    """
+    Converts a column into binary of protobuf format.
+
+    .. versionadded:: 3.4.0
+
+    Parameters
+    ----------
+    data : :class:`~pyspark.sql.Column` or str
+        the data column.
+    messageClassName: str
+        The Protobuf class name. E.g. <code>org.spark.examples.protobuf.ExampleEvent</code>.
+        Using the spark-submit option --jars, add a messageClassName specific jar.
+
+    Notes
+    -----
+    Protobuf functionality is provided as an pluggable external module
+
+    Examples
+    --------
+    >>> data = [([(1668035962, 2020)])]
+    >>> ddl_schema = "value struct<seconds: LONG, nanos: INT>"
+    >>> df = spark.createDataFrame(data, ddl_schema)
+    >>> message_class_name = "org.sparkproject.spark-protobuf.protobuf.Timestamp"
+    >>> proto_df = df.select(to_protobuf(df.value, message_class_name).alias("suite"))
+    >>> proto_df.show(truncate=False)
+    +----------------------------+
+    |suite                       |
+    +----------------------------+
+    |[08 FA EA B0 9B 06 10 E4 0F]|
+    +----------------------------+
+    """
+    sc = SparkContext._active_spark_context
+    assert sc is not None and sc._jvm is not None
+    try:
+        jc = sc._jvm.org.apache.spark.sql.protobuf.functions.to_protobuf(
+            _to_java_column(data), messageClassName
+        )
+    except TypeError as e:
+        if str(e) == "'JavaPackage' object is not callable":
+            _print_missing_jar("Protobuf", "protobuf", "protobuf", sc.version)
+        raise
+    return Column(jc)
 
 def _test() -> None:
     import os
@@ -198,6 +294,8 @@ def _test() -> None:
     spark = (
         SparkSession.builder.master("local[2]")
         .appName("sql.protobuf.functions tests")
+        .config("spark.driver.host", "127.0.0.1")
+        .config("spark.driver.port", "5055")
         .getOrCreate()
     )
     globs["spark"] = spark
