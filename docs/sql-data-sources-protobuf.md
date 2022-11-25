@@ -52,8 +52,7 @@ Kafka key-value record will be augmented with some metadata, such as the ingesti
 {% highlight scala %}
 import org.apache.spark.sql.protobuf.functions._
 
-// `from_avro` requires Protobuf schema in JSON string format.
-val jsonFormatSchema = new String(Files.readAllBytes(Paths.get("./examples/src/main/resources/user.avsc")))
+// `from_protobuf` and `to_protobuf` provides two schema choices. First, via the protobuf descriptor file, and then via the protobuf message class name.
 
 val df = spark
   .readStream
@@ -64,11 +63,12 @@ val df = spark
 
 // 1. Decode the Protobuf data into a struct;
 // 2. Filter by column `favorite_color`;
-// 3. Encode the column `name` in Protobuf format.
+// 3. Encode the column `user` in Protobuf format.
+// The Protobuf protoc command can be used to generate a protobuf descriptor file for give .proto file.
 val output = df
-  .select(from_protobuf($"value", jsonFormatSchema) as $"user")
+  .select(from_protobuf($"value", protobufMessageName, descriptorFilePath) as $"user")
   .where("user.favorite_color == \"red\"")
-  .select(to_avro($"user.name") as $"value")
+  .select(to_protobuf($"user", protobufMessageName, descriptorFilePath) as $"value")
 
 val query = output
   .writeStream
@@ -77,6 +77,20 @@ val query = output
   .option("topic", "topic2")
   .start()
 
+// Alternatively, you can decode and encode the SQL columns into protobuf format using protobuf class name.
+// The specified Protobuf class must match the data, otherwise the behavior is undefined: it may fail or return arbitrary result. The jar containing Java class should be shaded. Specifically, `com.google.protobuf.*` should be shaded to `org.sparkproject.spark-protobuf.protobuf.*`.
+val output = df
+.select(from_protobuf($"value", "org.spark.protobuf.User") as $"user")
+.where("user.favorite_color == \"red\"")
+.select(to_protobuf($"user", "org.spark.protobuf.User") as $"value")
+
+val query = output
+.writeStream
+.format("kafka")
+.option("kafka.bootstrap.servers", "host1:port1,host2:port2")
+.option("topic", "topic2")
+.start()
+
 {% endhighlight %}
 </div>
 <div data-lang="java" markdown="1">
@@ -84,8 +98,7 @@ val query = output
 import static org.apache.spark.sql.functions.col;
 import static org.apache.spark.sql.protobuf.functions.*;
 
-// `from_protobuf` requires Avro schema in JSON string format.
-String jsonFormatSchema = new String(Files.readAllBytes(Paths.get("./examples/src/main/resources/user.avsc")));
+// `from_protobuf` and `to_protobuf` provides two schema choices. First, via the protobuf descriptor file, and then via the protobuf message class name.
 
 Dataset<Row> df = spark
   .readStream()
@@ -94,13 +107,21 @@ Dataset<Row> df = spark
   .option("subscribe", "topic1")
   .load();
 
-// 1. Decode the Avro data into a struct;
+// 1. Decode the Protobuf data into a struct;
 // 2. Filter by column `favorite_color`;
-// 3. Encode the column `name` in Avro format.
+// 3. Encode the column `user` in Protobuf format.
+// The Protobuf protoc command can be used to generate a protobuf descriptor file for give .proto file.
 Dataset<Row> output = df
-  .select(from_protobuf(col("value"), jsonFormatSchema).as("user"))
+  .select(from_protobuf(col("value"), protobufMessageName, descriptorFilePath).as("user"))
   .where("user.favorite_color == \"red\"")
-  .select(to_avro(col("user.name")).as("value"));
+  .select(to_protobuf(col("user"), protobufMessageName, descriptorFilePath).as("value"));
+
+// Alternatively, you can decode and encode the SQL columns into protobuf format using protobuf class name.
+// The specified Protobuf class must match the data, otherwise the behavior is undefined: it may fail or return arbitrary result. The jar containing Java class should be shaded. Specifically, `com.google.protobuf.*` should be shaded to `org.sparkproject.spark-protobuf.protobuf.*`.
+Dataset<Row> output = df
+  .select(from_protobuf(col("value"), "org.spark.protobuf.User").as("user"))
+  .where("user.favorite_color == \"red\"")
+  .select(to_protobuf(col("user"), "org.spark.protobuf.User").as("value"));
 
 StreamingQuery query = output
   .writeStream()
@@ -115,8 +136,7 @@ StreamingQuery query = output
 {% highlight python %}
 from pyspark.sql.protobuf.functions import from_protobuf, to_protobuf
 
-# `from_avro` requires Avro schema in JSON string format.
-jsonFormatSchema = open("examples/src/main/resources/user.avsc", "r").read()
+# `from_protobuf` and `to_protobuf` provides two schema choices. First, via the protobuf descriptor file, and then via the protobuf message class name.
 
 df = spark\
   .readStream\
@@ -125,13 +145,21 @@ df = spark\
   .option("subscribe", "topic1")\
   .load()
 
-# 1. Decode the Avro data into a struct;
+# 1. Decode the Protobuf data into a struct;
 # 2. Filter by column `favorite_color`;
-# 3. Encode the column `name` in Protobuf format.
+# 3. Encode the column `user` in Protobuf format.
+# The Protobuf protoc command can be used to generate a protobuf descriptor file for give .proto file.
 output = df\
-  .select(from_protobuf("value", jsonFormatSchema).alias("user"))\
+  .select(from_protobuf("value", protobufMessageName, descriptorFilePath).alias("user"))\
   .where('user.favorite_color == "red"')\
-  .select(to_avro("user.name").alias("value"))
+  .select(to_protobuf("user", protobufMessageName, descriptorFilePath).alias("value"))
+
+# Alternatively, you can decode and encode the SQL columns into protobuf format using protobuf class name.
+# The specified Protobuf class must match the data, otherwise the behavior is undefined: it may fail or return arbitrary result. The jar containing Java class should be shaded. Specifically, `com.google.protobuf.*` should be shaded to `org.sparkproject.spark-protobuf.protobuf.*`.
+output = df\
+  .select(from_protobuf("value", "org.spark.protobuf.User").alias("user"))\
+  .where('user.favorite_color == "red"')\
+  .select(to_protobuf("user", "org.spark.protobuf.User").alias("value"))
 
 query = output\
   .writeStream\
@@ -142,206 +170,16 @@ query = output\
 
 {% endhighlight %}
 </div>
-<div data-lang="r" markdown="1">
-{% highlight r %}
-
-# `from_protobuf` requires Protobuf schema in JSON string format.
-jsonFormatSchema <- paste0(readLines("examples/src/main/resources/user.avsc"), collapse=" ")
-
-df <- read.stream(
-  "kafka",
-  kafka.bootstrap.servers = "host1:port1,host2:port2",
-  subscribe = "topic1"
-)
-
-# 1. Decode the Avro data into a struct;
-# 2. Filter by column `favorite_color`;
-# 3. Encode the column `name` in Protobuf format.
-
-output <- select(
-  filter(
-    select(df, alias(from_Protobuf("value", jsonFormatSchema), "user")),
-    column("user.favorite_color") == "red"
-  ),
-  alias(to_avro("user.name"), "value")
-)
-
-write.stream(
-  output,
-  "kafka",
-  kafka.bootstrap.servers = "host1:port1,host2:port2",
-  topic = "topic2"
-)
-{% endhighlight %}
-</div>
 </div>
 
-## Data Source Option
+## Supported types for Protobuf -> Spark SQL conversion
+Currently Spark supports reading [protobuf scalar types](https://developers.google.com/protocol-buffers/docs/proto3#scalar), [enum types](https://developers.google.com/protocol-buffers/docs/proto3#enum), [nested type](https://developers.google.com/protocol-buffers/docs/proto3#nested), and [maps type](https://developers.google.com/protocol-buffers/docs/proto3#maps) under messages of Protobuf.
+One common issue that can arise when working with Protobuf data is the presence of circular references. In Protobuf, a circular reference occurs when a field refers back to itself or to another field that refers back to the original field. This can cause issues when parsing the data, as it can result in infinite loops or other unexpected behavior.
+To address this issue, the latest version of spark-protobuf introduces a new feature: the ability to check for circular references through field types. This allows users use the **`circularReferenceDepth`** option to specify the maximum number of levels of recursion to allow when parsing the schema. By default, **`spark-protobuf`** disables recursive fields by setting **`circularReferenceDepth`** to -1. However, you can set this option to 0, 1, or 2 if needed.
+Setting **`circularReferenceDepth`** to 0 allows the field to be recursed once, setting it to 1 allows it to be recursed twice, and setting it to 2 allows it to be recursed thrice. A **`circularReferenceDepth`** value greater than 2 is not allowed, as it can lead to performance issues and even stack overflows.
+In addition to the new circular reference check, the latest version of spark-protobuf also introduces support for Protobuf OneOf fields. which allows you to handle messages that can have multiple possible sets of fields, but only one set can be present at a time. This is useful for situations where the data you are working with is not always in the same format, and you need to be able to handle messages with different sets of fields without encountering errors.
+Spark SQL schema is generated based on the Protobuf descriptor file or Protobuf class passed to "from_protobuf" and "to_protobuf". The specified Protobuf class or Protobuf descriptor file must match the data, otherwise, the behavior is undefined: it may fail or return arbitrary results.
 
-Data source options of Avro can be set via:
- * the `.option` method on `DataFrameReader` or `DataFrameWriter`.
- * the `options` parameter in function `from_avro`.
-
-<table class="table">
-  <tr><th><b>Property Name</b></th><th><b>Default</b></th><th><b>Meaning</b></th><th><b>Scope</b></th><th><b>Since Version</b></th></tr>
-  <tr>
-    <td><code>avroSchema</code></td>
-    <td>None</td>
-    <td>Optional schema provided by a user in JSON format.
-      <ul>
-        <li>
-          When reading Avro files or calling function <code>from_avro</code>, this option can be set to an evolved schema, which is compatible but different with
-          the actual Avro schema. The deserialization schema will be consistent with the evolved schema.
-          For example, if we set an evolved schema containing one additional column with a default value,
-          the reading result in Spark will contain the new column too. Note that when using this option with 
-          <code>from_avro</code>, you still need to pass the actual Avro schema as a parameter to the function.
-        </li>
-        <li>
-          When writing Avro, this option can be set if the expected output Avro schema doesn't match the
-          schema converted by Spark. For example, the expected schema of one column is of "enum" type,
-          instead of "string" type in the default converted schema.
-        </li>
-      </ul>
-    </td>
-    <td> read, write and function <code>from_avro</code></td>
-    <td>2.4.0</td>
-  </tr>
-  <tr>
-    <td><code>recordName</code></td>
-    <td>topLevelRecord</td>
-    <td>Top level record name in write result, which is required in Avro spec.</td>
-    <td>write</td>
-    <td>2.4.0</td>
-  </tr>
-  <tr>
-    <td><code>recordNamespace</code></td>
-    <td>""</td>
-    <td>Record namespace in write result.</td>
-    <td>write</td>
-    <td>2.4.0</td>
-  </tr>
-  <tr>
-    <td><code>ignoreExtension</code></td>
-    <td>true</td>
-    <td>The option controls ignoring of files without <code>.avro</code> extensions in read.<br> If the option is enabled, all files (with and without <code>.avro</code> extension) are loaded.<br> The option has been deprecated, and it will be removed in the future releases. Please use the general data source option <a href="./sql-data-sources-generic-options.html#path-global-filter">pathGlobFilter</a> for filtering file names.</td>
-    <td>read</td>
-    <td>2.4.0</td>
-  </tr>
-  <tr>
-    <td><code>compression</code></td>
-    <td>snappy</td>
-    <td>The <code>compression</code> option allows to specify a compression codec used in write.<br>
-  Currently supported codecs are <code>uncompressed</code>, <code>snappy</code>, <code>deflate</code>, <code>bzip2</code>, <code>xz</code> and <code>zstandard</code>.<br> If the option is not set, the configuration <code>spark.sql.avro.compression.codec</code> config is taken into account.</td>
-    <td>write</td>
-    <td>2.4.0</td>
-  </tr>
-  <tr>
-    <td><code>mode</code></td>
-    <td>FAILFAST</td>
-    <td>The <code>mode</code> option allows to specify parse mode for function <code>from_avro</code>.<br>
-      Currently supported modes are:
-      <ul>
-        <li><code>FAILFAST</code>: Throws an exception on processing corrupted record.</li>
-        <li><code>PERMISSIVE</code>: Corrupt records are processed as null result. Therefore, the
-        data schema is forced to be fully nullable, which might be different from the one user provided.</li>
-      </ul>
-    </td>
-    <td>function <code>from_avro</code></td>
-    <td>2.4.0</td>
-  </tr>
-  <tr>
-    <td><code>datetimeRebaseMode</code></td>
-    <td>(value of <code>spark.sql.avro.datetimeRebaseModeInRead</code> configuration)</td>
-    <td>The <code>datetimeRebaseMode</code> option allows to specify the rebasing mode for the values of the <code>date</code>, <code>timestamp-micros</code>, <code>timestamp-millis</code> logical types from the Julian to Proleptic Gregorian calendar.<br>
-      Currently supported modes are:
-      <ul>
-        <li><code>EXCEPTION</code>: fails in reads of ancient dates/timestamps that are ambiguous between the two calendars.</li>
-        <li><code>CORRECTED</code>: loads dates/timestamps without rebasing.</li>
-        <li><code>LEGACY</code>: performs rebasing of ancient dates/timestamps from the Julian to Proleptic Gregorian calendar.</li>
-      </ul>
-    </td>
-    <td>read and function <code>from_avro</code></td>
-    <td>3.2.0</td>
-  </tr>
-  <tr>
-    <td><code>positionalFieldMatching</code></td>
-    <td>false</td>
-    <td>This can be used in tandem with the `avroSchema` option to adjust the behavior for matching the fields in the provided Avro schema with those in the SQL schema. By default, the matching will be performed using field names, ignoring their positions. If this option is set to "true", the matching will be based on the position of the fields.</td>
-    <td>read and write</td>
-    <td>3.2.0</td>
-  </tr>
-</table>
-
-## Configuration
-Configuration of Avro can be done using the `setConf` method on SparkSession or by running `SET key=value` commands using SQL.
-<table class="table">
-  <tr><th><b>Property Name</b></th><th><b>Default</b></th><th><b>Meaning</b></th><th><b>Since Version</b></th></tr>
-  <tr>
-    <td>spark.sql.legacy.replaceDatabricksSparkAvro.enabled</td>
-    <td>true</td>
-    <td>
-      If it is set to true, the data source provider <code>com.databricks.spark.avro</code> is mapped
-      to the built-in but external Avro data source module for backward compatibility.
-      <br><b>Note:</b> the SQL config has been deprecated in Spark 3.2 and might be removed in the future.
-    </td>
-    <td>2.4.0</td>
-  </tr>
-  <tr>
-    <td>spark.sql.avro.compression.codec</td>
-    <td>snappy</td>
-    <td>
-      Compression codec used in writing of AVRO files. Supported codecs: uncompressed, deflate,
-      snappy, bzip2 and xz. Default codec is snappy.
-    </td>
-    <td>2.4.0</td>
-  </tr>
-  <tr>
-    <td>spark.sql.avro.deflate.level</td>
-    <td>-1</td>
-    <td>
-      Compression level for the deflate codec used in writing of AVRO files. Valid value must be in
-      the range of from 1 to 9 inclusive or -1. The default value is -1 which corresponds to 6 level
-      in the current implementation.
-    </td>
-    <td>2.4.0</td>
-  </tr>
-  <tr>
-    <td>spark.sql.avro.datetimeRebaseModeInRead</td>
-    <td><code>EXCEPTION</code></td>
-    <td>The rebasing mode for the values of the <code>date</code>, <code>timestamp-micros</code>, <code>timestamp-millis</code> logical types from the Julian to Proleptic Gregorian calendar:<br>
-      <ul>
-        <li><code>EXCEPTION</code>: Spark will fail the reading if it sees ancient dates/timestamps that are ambiguous between the two calendars.</li>
-        <li><code>CORRECTED</code>: Spark will not do rebase and read the dates/timestamps as it is.</li>
-        <li><code>LEGACY</code>: Spark will rebase dates/timestamps from the legacy hybrid (Julian + Gregorian) calendar to Proleptic Gregorian calendar when reading Avro files.</li>
-      </ul>
-      This config is only effective if the writer info (like Spark, Hive) of the Avro files is unknown.
-    </td>
-    <td>3.0.0</td>
-  </tr>
-  <tr>
-    <td>spark.sql.avro.datetimeRebaseModeInWrite</td>
-    <td><code>EXCEPTION</code></td>
-    <td>The rebasing mode for the values of the <code>date</code>, <code>timestamp-micros</code>, <code>timestamp-millis</code> logical types from the Proleptic Gregorian to Julian calendar:<br>
-      <ul>
-        <li><code>EXCEPTION</code>: Spark will fail the writing if it sees ancient dates/timestamps that are ambiguous between the two calendars.</li>
-        <li><code>CORRECTED</code>: Spark will not do rebase and write the dates/timestamps as it is.</li>
-        <li><code>LEGACY</code>: Spark will rebase dates/timestamps from Proleptic Gregorian calendar to the legacy hybrid (Julian + Gregorian) calendar when writing Avro files.</li>
-      </ul>
-    </td>
-    <td>3.0.0</td>
-  </tr>
-  <tr>
-    <td>spark.sql.avro.filterPushdown.enabled</td>
-    <td>true</td>
-    <td>
-      When true, enable filter pushdown to Avro datasource.
-    </td>
-    <td>3.1.0</td>
-  </tr>
-</table>
-
-## Supported types for Avro -> Spark SQL conversion
-Currently Spark supports reading all [primitive types](https://avro.apache.org/docs/1.11.1/specification/#primitive-types) and [complex types](https://avro.apache.org/docs/1.11.1/specification/#complex-types) under records of Avro.
 <table class="table">
   <tr><th><b>Protobuf type</b></th><th><b>Spark SQL type</b></th></tr>
   <tr>
@@ -373,19 +211,15 @@ Currently Spark supports reading all [primitive types](https://avro.apache.org/d
     <td>StringType</td>
   </tr>
   <tr>
-    <td>fixed</td>
-    <td>BinaryType</td>
-  </tr>
-  <tr>
     <td>bytes</td>
     <td>BinaryType</td>
   </tr>
   <tr>
-    <td>record</td>
+    <td>Message</td>
     <td>StructType</td>
   </tr>
   <tr>
-    <td>array</td>
+    <td>repeated</td>
     <td>ArrayType</td>
   </tr>
   <tr>
@@ -393,109 +227,75 @@ Currently Spark supports reading all [primitive types](https://avro.apache.org/d
     <td>MapType</td>
   </tr>
   <tr>
-    <td>union</td>
-    <td>See below</td>
+    <td>OneOf</td>
+    <td>Struct</td>
   </tr>
 </table>
 
-In addition to the types listed above, it supports reading `union` types. The following three types are considered basic `union` types:
-
-1. `union(int, long)` will be mapped to LongType.
-2. `union(float, double)` will be mapped to DoubleType.
-3. `union(something, null)`, where something is any supported Avro type. This will be mapped to the same Spark SQL type as that of something, with nullable set to true.
-All other union types are considered complex. They will be mapped to StructType where field names are member0, member1, etc., in accordance with members of the union. This is consistent with the behavior when converting between Avro and Parquet.
-
-It also supports reading the following Avro [logical types](https://avro.apache.org/docs/1.11.1/specification/#logical-types):
+It also supports reading the following Protobuf types [Timestamp](https://developers.google.com/protocol-buffers/docs/reference/google.protobuf#timestamp) and [Duration](https://developers.google.com/protocol-buffers/docs/reference/google.protobuf#duration)
 
 <table class="table">
-  <tr><th><b>Protobuf logical type</b></th><th><b>Avro type</b></th><th><b>Spark SQL type</b></th></tr>
+  <tr><th><b>Protobuf logical type</b></th><th><b>Protobuf schema</b></th><th><b>Spark SQL type</b></th></tr>
   <tr>
-    <td>date</td>
-    <td>int</td>
-    <td>DateType</td>
+    <td>duration</td>
+    <td>MessageType{seconds: Long, nanos: Int}</td>
+    <td>DayTimeIntervalType</td>
   </tr>
   <tr>
-    <td>timestamp-millis</td>
-    <td>long</td>
+    <td>timestamp</td>
+    <td>MessageType{seconds: Long, nanos: Int}</td>
     <td>TimestampType</td>
-  </tr>
-  <tr>
-    <td>timestamp-micros</td>
-    <td>long</td>
-    <td>TimestampType</td>
-  </tr>
-  <tr>
-    <td>decimal</td>
-    <td>fixed</td>
-    <td>DecimalType</td>
-  </tr>
-  <tr>
-    <td>decimal</td>
-    <td>bytes</td>
-    <td>DecimalType</td>
-  </tr>
-</table>
-At the moment, it ignores docs, aliases and other properties present in the Avro file.
-
-## Supported types for Spark SQL -> Avro conversion
-Spark supports writing of all Spark SQL types into Avro. For most types, the mapping from Spark types to Avro types is straightforward (e.g. IntegerType gets converted to int); however, there are a few special cases which are listed below:
-
-<table class="table">
-<tr><th><b>Spark SQL type</b></th><th><b>Protobuf type</b></th><th><b>Protobuf logical type</b></th></tr>
-  <tr>
-    <td>ByteType</td>
-    <td>int</td>
-    <td></td>
-  </tr>
-  <tr>
-    <td>ShortType</td>
-    <td>int</td>
-    <td></td>
-  </tr>
-  <tr>
-    <td>BinaryType</td>
-    <td>bytes</td>
-    <td></td>
-  </tr>
-  <tr>
-    <td>DateType</td>
-    <td>int</td>
-    <td>date</td>
-  </tr>
-  <tr>
-    <td>TimestampType</td>
-    <td>long</td>
-    <td>timestamp-micros</td>
-  </tr>
-  <tr>
-    <td>DecimalType</td>
-    <td>fixed</td>
-    <td>decimal</td>
   </tr>
 </table>
 
-You can also specify the whole output Avro schema with the option `avroSchema`, so that Spark SQL types can be converted into other Avro types. The following conversions are not applied by default and require user specified Avro schema:
+## Supported types for Spark SQL -> Protobuf conversion
+Spark supports the writing of all Spark SQL types into Protobuf. For most types, the mapping from Spark types to Protobuf types is straightforward (e.g. IntegerType gets converted to int);
+Spark SQL schema is generated based on the Protobuf descriptor file or Protobuf class passed to "from_protobuf" and "to_protobuf". The specified Protobuf class or Protobuf descriptor file must match the data, otherwise, the behavior is undefined: it may fail or return arbitrary results. 
 
 <table class="table">
-  <tr><th><b>Spark SQL type</b></th><th><b>Avro type</b></th><th><b>Avro logical type</b></th></tr>
+  <tr><th><b>Spark SQL type</b></th><th><b>Protobuf type</b></th></tr>
   <tr>
-    <td>BinaryType</td>
-    <td>fixed</td>
-    <td></td>
+    <td>BooleanType</td>
+    <td>boolean</td>
+  </tr>
+  <tr>
+    <td>IntegerType</td>
+    <td>int</td>
+  </tr>
+  <tr>
+    <td>LongType</td>
+    <td>long</td>
+  </tr>
+  <tr>
+    <td>FloatType</td>
+    <td>float</td>
+  </tr>
+  <tr>
+    <td>DoubleType</td>
+    <td>double</td>
+  </tr>
+  <tr>
+    <td>StringType</td>
+    <td>string</td>
   </tr>
   <tr>
     <td>StringType</td>
     <td>enum</td>
-    <td></td>
   </tr>
   <tr>
-    <td>TimestampType</td>
-    <td>long</td>
-    <td>timestamp-millis</td>
-  </tr>
-  <tr>
-    <td>DecimalType</td>
+    <td>BinaryType</td>
     <td>bytes</td>
-    <td>decimal</td>
+  </tr>
+  <tr>
+    <td>StructType</td>
+    <td>Message</td>
+  </tr>
+  <tr>
+    <td>ArrayType</td>
+    <td>repeated</td>
+  </tr>
+  <tr>
+    <td>MapType</td>
+    <td>map</td>
   </tr>
 </table>
