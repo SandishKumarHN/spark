@@ -1,0 +1,67 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+// cd connector/protobuf/src/test/resources/protobuf
+// protoc --java_out=./ core_event.proto
+// protoc --include_imports --descriptor_set_out=core_event.desc --java_out=org/apache/spark/sql/protobuf/ core_event.proto
+
+
+syntax = "proto3";
+
+package org.apache.spark.sql.protobuf.protos;
+
+import "google/protobuf/timestamp.proto";
+
+message Event {
+    Header header = 1;
+
+    oneof payload {
+        CommandReject command_reject = 2;
+        OrderTradeWriterDBSnapshot order_trade_writer_db_snapshot = 3;
+        MarketTradeStoreSnapshot market_trade_store_snapshot = 4;
+        OrderSnapshot order_snapshot = 5;
+    }
+}
+
+message CommandReject {
+    Event rejected_command = 1;
+    string reason = 2;
+}
+
+message OrderTradeWriterDBSnapshot {
+    repeated Event events = 1;
+}
+
+message MarketTradeStoreSnapshot {
+    repeated Event events = 1;
+}
+
+message OrderSnapshot {
+    string target_group = 1;
+    bool post_only = 2;
+    repeated OrderExecute orderExecutes = 3;
+}
+
+message OrderExecute {
+    string trade_id = 1;
+    google.protobuf.Timestamp trade_time = 2;
+    OrderExecute original_order_execute = 3;
+}
+
+message Header {
+    string key = 1;
+    string value = 2;
+}

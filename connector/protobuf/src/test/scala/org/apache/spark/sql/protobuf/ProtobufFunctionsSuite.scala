@@ -693,4 +693,13 @@ class ProtobufFunctionsSuite extends QueryTest with SharedSparkSession with Prot
       errorClass = "CANNOT_CONSTRUCT_PROTOBUF_DESCRIPTOR",
       parameters = Map("descFilePath" -> testFileDescriptor))
   }
+
+  test("Oneof unit tests") {
+    val df = Seq(ByteString.empty().toByteArray).toDF("value")
+    val testFileDescriptor = testFile("core_event.desc", "protobuf/core_event.desc")
+
+    val resDf = df.select(functions.from_protobuf($"value", "Event", testFileDescriptor) as 'sample)
+    resDf.printSchema()
+    resDf.show()
+  }
 }

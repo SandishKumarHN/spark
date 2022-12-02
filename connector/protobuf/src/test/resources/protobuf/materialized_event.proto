@@ -1,0 +1,41 @@
+syntax = "proto3";
+package org.apache.spark.events.materialized;
+
+import "google/protobuf/timestamp.proto";
+import "core.proto";
+
+message MaterializedEvent {
+  Header header = 1;
+  core.Event trading_core_event = 2;
+  oneof payload {
+    RootOrder root_order = 3;
+    ChildOrder child_order = 4;
+    LeafOrder leaf_order = 5;
+  }
+}
+
+message Header {
+  int64 sequence = 1;
+  google.protobuf.Timestamp timestamp = 2;
+}
+
+message RootOrder {
+  string order_id = 1;
+  string product_id = 2;
+  string user_id = 3;
+  string client_order_id = 4;
+}
+
+message ChildOrder {
+  string order_id = 1;
+  string root_order_id = 2;
+  string parent_order_id = 3;
+  string product_id = 4;
+  string user_id = 5;
+}
+
+message LeafOrder {
+  ChildOrder child_order = 1;
+  string venue_order_id = 2;
+}
+
