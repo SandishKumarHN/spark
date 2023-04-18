@@ -23,7 +23,7 @@ from pyspark.pandas.config import set_option, reset_option
 from pyspark.testing.pandasutils import PandasOnSparkTestCase, TestUtils
 
 
-class OpsOnDiffFramesGroupByRollingTest(PandasOnSparkTestCase, TestUtils):
+class OpsOnDiffFramesGroupByRollingTestsMixin:
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -94,12 +94,18 @@ class OpsOnDiffFramesGroupByRollingTest(PandasOnSparkTestCase, TestUtils):
         self._test_groupby_rolling_func("var")
 
 
+class OpsOnDiffFramesGroupByRollingTests(
+    OpsOnDiffFramesGroupByRollingTestsMixin, PandasOnSparkTestCase, TestUtils
+):
+    pass
+
+
 if __name__ == "__main__":
     import unittest
     from pyspark.pandas.tests.test_ops_on_diff_frames_groupby_rolling import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

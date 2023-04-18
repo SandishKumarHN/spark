@@ -29,9 +29,9 @@ import org.apache.spark.sql.types.{ArrayType, DecimalType, FloatType, ShortType}
 import org.apache.spark.tags.DockerTest
 
 /**
- * To run this test suite for a specific version (e.g., postgres:14.0):
+ * To run this test suite for a specific version (e.g., postgres:15.1):
  * {{{
- *   ENABLE_DOCKER_INTEGRATION_TESTS=1 POSTGRES_DOCKER_IMAGE_NAME=postgres:14.0
+ *   ENABLE_DOCKER_INTEGRATION_TESTS=1 POSTGRES_DOCKER_IMAGE_NAME=postgres:15.1
  *     ./build/sbt -Pdocker-integration-tests
  *     "testOnly org.apache.spark.sql.jdbc.PostgresIntegrationSuite"
  * }}}
@@ -39,7 +39,7 @@ import org.apache.spark.tags.DockerTest
 @DockerTest
 class PostgresIntegrationSuite extends DockerJDBCIntegrationSuite {
   override val db = new DatabaseOnDocker {
-    override val imageName = sys.env.getOrElse("POSTGRES_DOCKER_IMAGE_NAME", "postgres:14.0-alpine")
+    override val imageName = sys.env.getOrElse("POSTGRES_DOCKER_IMAGE_NAME", "postgres:15.1-alpine")
     override val env = Map(
       "POSTGRES_PASSWORD" -> "rootpass"
     )
@@ -122,13 +122,15 @@ class PostgresIntegrationSuite extends DockerJDBCIntegrationSuite {
     ).executeUpdate()
 
     conn.prepareStatement("CREATE TABLE char_types (" +
-      "c0 char(4), c1 character(4), c2 character varying(4), c3 varchar(4), c4 bpchar)"
+      "c0 char(4), c1 character(4), c2 character varying(4), c3 varchar(4), c4 bpchar(1))"
     ).executeUpdate()
     conn.prepareStatement("INSERT INTO char_types VALUES " +
       "('abcd', 'efgh', 'ijkl', 'mnop', 'q')").executeUpdate()
 
+    // SPARK-42916: character/char/bpchar w/o length specifier defaults to int max value, this will
+    // cause OOM as it will be padded with ' ' to 2147483647.
     conn.prepareStatement("CREATE TABLE char_array_types (" +
-      "c0 char(4)[], c1 character(4)[], c2 character varying(4)[], c3 varchar(4)[], c4 bpchar[])"
+      "c0 char(4)[], c1 character(4)[], c2 character varying(4)[], c3 varchar(4)[], c4 bpchar(1)[])"
     ).executeUpdate()
     conn.prepareStatement("INSERT INTO char_array_types VALUES " +
       """('{"a", "bcd"}', '{"ef", "gh"}', '{"i", "j", "kl"}', '{"mnop"}', '{"q", "r"}')"""

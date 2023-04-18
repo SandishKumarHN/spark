@@ -25,15 +25,15 @@ libraryDependencies += "com.puppycrawl.tools" % "checkstyle" % "9.3"
 // checkstyle uses guava 31.0.1-jre.
 libraryDependencies += "com.google.guava" % "guava" % "31.0.1-jre"
 
-addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "1.2.0")
+addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "2.1.0")
 
-addSbtPlugin("com.typesafe.sbteclipse" % "sbteclipse-plugin" % "5.2.4")
+addSbtPlugin("com.github.sbt" % "sbt-eclipse" % "6.0.0")
 
 addSbtPlugin("org.scalastyle" %% "scalastyle-sbt-plugin" % "1.0.0")
 
 addSbtPlugin("com.typesafe" % "sbt-mima-plugin" % "1.1.0")
 
-addSbtPlugin("com.eed3si9n" % "sbt-unidoc" % "0.4.3")
+addSbtPlugin("com.github.sbt" % "sbt-unidoc" % "0.5.0")
 
 addSbtPlugin("io.spray" % "sbt-revolver" % "0.9.1")
 

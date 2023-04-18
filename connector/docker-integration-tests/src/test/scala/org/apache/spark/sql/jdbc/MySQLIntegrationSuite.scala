@@ -26,9 +26,9 @@ import org.apache.spark.sql.catalyst.util.DateTimeTestUtils._
 import org.apache.spark.tags.DockerTest
 
 /**
- * To run this test suite for a specific version (e.g., mysql:5.7.36):
+ * To run this test suite for a specific version (e.g., mysql:8.0.31):
  * {{{
- *   ENABLE_DOCKER_INTEGRATION_TESTS=1 MYSQL_DOCKER_IMAGE_NAME=mysql:5.7.36
+ *   ENABLE_DOCKER_INTEGRATION_TESTS=1 MYSQL_DOCKER_IMAGE_NAME=mysql:8.0.31
  *     ./build/sbt -Pdocker-integration-tests
  *     "testOnly org.apache.spark.sql.jdbc.MySQLIntegrationSuite"
  * }}}
@@ -36,7 +36,7 @@ import org.apache.spark.tags.DockerTest
 @DockerTest
 class MySQLIntegrationSuite extends DockerJDBCIntegrationSuite {
   override val db = new DatabaseOnDocker {
-    override val imageName = sys.env.getOrElse("MYSQL_DOCKER_IMAGE_NAME", "mysql:5.7.36")
+    override val imageName = sys.env.getOrElse("MYSQL_DOCKER_IMAGE_NAME", "mysql:8.0.31")
     override val env = Map(
       "MYSQL_ROOT_PASSWORD" -> "rootpass"
     )
@@ -147,7 +147,7 @@ class MySQLIntegrationSuite extends DockerJDBCIntegrationSuite {
     assert(types(6).equals("class [B"))
     assert(types(7).equals("class [B"))
     assert(types(8).equals("class [B"))
-    assert(rows(0).getString(0).equals("the"))
+    assert(rows(0).getString(0).equals("the".padTo(10, ' ')))
     assert(rows(0).getString(1).equals("quick"))
     assert(rows(0).getString(2).equals("brown"))
     assert(rows(0).getString(3).equals("fox"))

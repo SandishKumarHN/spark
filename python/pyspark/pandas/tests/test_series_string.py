@@ -24,7 +24,7 @@ from pyspark.testing.pandasutils import PandasOnSparkTestCase
 from pyspark.testing.sqlutils import SQLTestUtils
 
 
-class SeriesStringTest(PandasOnSparkTestCase, SQLTestUtils):
+class SeriesStringTestsMixin:
     @property
     def pser(self):
         return pd.Series(
@@ -331,12 +331,16 @@ class SeriesStringTest(PandasOnSparkTestCase, SQLTestUtils):
             self.check_func(lambda x: x.str.get_dummies())
 
 
+class SeriesStringTests(SeriesStringTestsMixin, PandasOnSparkTestCase, SQLTestUtils):
+    pass
+
+
 if __name__ == "__main__":
     import unittest
     from pyspark.pandas.tests.test_series_string import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

@@ -22,7 +22,7 @@ import pyspark.pandas as ps
 from pyspark.pandas.tests.data_type_ops.testing_utils import OpsTestBase
 
 
-class NullOpsTest(OpsTestBase):
+class NullOpsTestsMixin:
     @property
     def pser(self):
         return pd.Series([None, None, None])
@@ -160,12 +160,16 @@ class NullOpsTest(OpsTestBase):
         self.assert_eq(pser >= pser, psser >= psser)
 
 
+class NullOpsTests(NullOpsTestsMixin, OpsTestBase):
+    pass
+
+
 if __name__ == "__main__":
     import unittest
     from pyspark.pandas.tests.data_type_ops.test_null_ops import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

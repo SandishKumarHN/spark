@@ -203,7 +203,7 @@ statement
     | LOAD DATA LOCAL? INPATH path=stringLit OVERWRITE? INTO TABLE
         multipartIdentifier partitionSpec?                             #loadData
     | TRUNCATE TABLE multipartIdentifier partitionSpec?                #truncateTable
-    | MSCK REPAIR TABLE multipartIdentifier
+    | (MSCK)? REPAIR TABLE multipartIdentifier
         (option=(ADD|DROP|SYNC) PARTITIONS)?                           #repairTable
     | op=(ADD | LIST) identifier .*?                                   #manageResource
     | SET ROLE .*?                                                     #failNativeCommand
@@ -319,6 +319,7 @@ query
 insertInto
     : INSERT OVERWRITE TABLE? multipartIdentifier (partitionSpec (IF NOT EXISTS)?)?  identifierList?        #insertOverwriteTable
     | INSERT INTO TABLE? multipartIdentifier partitionSpec? (IF NOT EXISTS)? identifierList?                #insertIntoTable
+    | INSERT INTO TABLE? multipartIdentifier REPLACE whereClause                                            #insertIntoReplaceWhere
     | INSERT OVERWRITE LOCAL? DIRECTORY path=stringLit rowFormat? createFileFormat?                            #insertOverwriteHiveDir
     | INSERT OVERWRITE LOCAL? DIRECTORY (path=stringLit)? tableProvider (OPTIONS options=propertyList)?        #insertOverwriteDir
     ;
@@ -696,7 +697,13 @@ setQuantifier
     ;
 
 relation
-    : LATERAL? relationPrimary joinRelation*
+    : LATERAL? relationPrimary relationExtension*
+    ;
+
+relationExtension
+    : joinRelation
+    | pivotClause
+    | unpivotClause
     ;
 
 joinRelation
@@ -921,10 +928,19 @@ primaryExpression
         (FILTER LEFT_PAREN WHERE where=booleanExpression RIGHT_PAREN)? ( OVER windowSpec)?     #percentile
     ;
 
+literalType
+    : DATE
+    | TIMESTAMP | TIMESTAMP_LTZ | TIMESTAMP_NTZ
+    | INTERVAL
+    | BINARY_HEX
+    | unsupportedType=identifier
+    ;
+
 constant
     : NULL                                                                                     #nullLiteral
+    | COLON identifier                                                                         #parameterLiteral
     | interval                                                                                 #intervalLiteral
-    | identifier stringLit                                                                     #typeConstructor
+    | literalType stringLit                                                                     #typeConstructor
     | number                                                                                   #numericLiteral
     | booleanValue                                                                             #booleanLiteral
     | stringLit+                                                                               #stringLiteral
@@ -947,7 +963,7 @@ booleanValue
     ;
 
 interval
-    : INTERVAL (errorCapturingMultiUnitsInterval | errorCapturingUnitToUnitInterval)?
+    : INTERVAL (errorCapturingMultiUnitsInterval | errorCapturingUnitToUnitInterval)
     ;
 
 errorCapturingMultiUnitsInterval
@@ -985,6 +1001,27 @@ colPosition
     : position=FIRST | position=AFTER afterCol=errorCapturingIdentifier
     ;
 
+type
+    : BOOLEAN
+    | TINYINT | BYTE
+    | SMALLINT | SHORT
+    | INT | INTEGER
+    | BIGINT | LONG
+    | FLOAT | REAL
+    | DOUBLE
+    | DATE
+    | TIMESTAMP | TIMESTAMP_NTZ | TIMESTAMP_LTZ
+    | STRING
+    | CHARACTER | CHAR
+    | VARCHAR
+    | BINARY
+    | DECIMAL | DEC | NUMERIC
+    | VOID
+    | INTERVAL
+    | ARRAY | STRUCT | MAP
+    | unsupportedType=identifier
+    ;
+
 dataType
     : complex=ARRAY LT dataType GT                              #complexDataType
     | complex=MAP LT dataType COMMA dataType GT                 #complexDataType
@@ -992,7 +1029,7 @@ dataType
     | INTERVAL from=(YEAR | MONTH) (TO to=MONTH)?               #yearMonthIntervalDataType
     | INTERVAL from=(DAY | HOUR | MINUTE | SECOND)
       (TO to=(HOUR | MINUTE | SECOND))?                         #dayTimeIntervalDataType
-    | identifier (LEFT_PAREN INTEGER_VALUE
+    | type (LEFT_PAREN INTEGER_VALUE
       (COMMA INTEGER_VALUE)* RIGHT_PAREN)?                      #primitiveDataType
     ;
 
@@ -1001,7 +1038,14 @@ qualifiedColTypeWithPositionList
     ;
 
 qualifiedColTypeWithPosition
-    : name=multipartIdentifier dataType (NOT NULL)? defaultExpression? commentSpec? colPosition?
+    : name=multipartIdentifier dataType colDefinitionDescriptorWithPosition*
+    ;
+
+colDefinitionDescriptorWithPosition
+    : NOT NULL
+    | defaultExpression
+    | commentSpec
+    | colPosition
     ;
 
 defaultExpression
@@ -1027,7 +1071,12 @@ createOrReplaceTableColType
 colDefinitionOption
     : NOT NULL
     | defaultExpression
+    | generationExpression
     | commentSpec
+    ;
+
+generationExpression
+    : GENERATED ALWAYS AS LEFT_PAREN expression RIGHT_PAREN
     ;
 
 complexColTypeList
@@ -1146,7 +1195,7 @@ alterColumnAction
     ;
 
 stringLit
-    : STRING
+    : STRING_LITERAL
     | {!double_quoted_identifiers}? DOUBLEQUOTED_STRING
     ;
 
@@ -1175,6 +1224,7 @@ ansiNonReserved
     : ADD
     | AFTER
     | ALTER
+    | ALWAYS
     | ANALYZE
     | ANTI
     | ANY_VALUE
@@ -1183,14 +1233,21 @@ ansiNonReserved
     | ASC
     | AT
     | BETWEEN
+    | BIGINT
+    | BINARY
+    | BINARY_HEX
+    | BOOLEAN
     | BUCKET
     | BUCKETS
     | BY
+    | BYTE
     | CACHE
     | CASCADE
     | CATALOG
     | CATALOGS
     | CHANGE
+    | CHAR
+    | CHARACTER
     | CLEAR
     | CLUSTER
     | CLUSTERED
@@ -1209,12 +1266,15 @@ ansiNonReserved
     | DATA
     | DATABASE
     | DATABASES
+    | DATE
     | DATEADD
     | DATEDIFF
     | DAY
     | DAYS
     | DAYOFYEAR
     | DBPROPERTIES
+    | DEC
+    | DECIMAL
     | DEFAULT
     | DEFINED
     | DELETE
@@ -1226,6 +1286,7 @@ ansiNonReserved
     | DIRECTORY
     | DISTRIBUTE
     | DIV
+    | DOUBLE
     | DROP
     | ESCAPED
     | EXCHANGE
@@ -1239,11 +1300,13 @@ ansiNonReserved
     | FIELDS
     | FILEFORMAT
     | FIRST
+    | FLOAT
     | FOLLOWING
     | FORMAT
     | FORMATTED
     | FUNCTION
     | FUNCTIONS
+    | GENERATED
     | GLOBAL
     | GROUPING
     | HOUR
@@ -1257,6 +1320,8 @@ ansiNonReserved
     | INPATH
     | INPUTFORMAT
     | INSERT
+    | INT
+    | INTEGER
     | INTERVAL
     | ITEMS
     | KEYS
@@ -1273,6 +1338,7 @@ ansiNonReserved
     | LOCK
     | LOCKS
     | LOGICAL
+    | LONG
     | MACRO
     | MAP
     | MATCHED
@@ -1292,6 +1358,7 @@ ansiNonReserved
     | NANOSECONDS
     | NO
     | NULLS
+    | NUMERIC
     | OF
     | OPTION
     | OPTIONS
@@ -1314,6 +1381,7 @@ ansiNonReserved
     | QUARTER
     | QUERY
     | RANGE
+    | REAL
     | RECORDREADER
     | RECORDWRITER
     | RECOVER
@@ -1345,8 +1413,10 @@ ansiNonReserved
     | SET
     | SETMINUS
     | SETS
+    | SHORT
     | SHOW
     | SKEWED
+    | SMALLINT
     | SORT
     | SORTED
     | SOURCE
@@ -1354,6 +1424,7 @@ ansiNonReserved
     | STATISTICS
     | STORED
     | STRATIFY
+    | STRING
     | STRUCT
     | SUBSTR
     | SUBSTRING
@@ -1367,8 +1438,11 @@ ansiNonReserved
     | TEMPORARY
     | TERMINATED
     | TIMESTAMP
+    | TIMESTAMP_LTZ
+    | TIMESTAMP_NTZ
     | TIMESTAMPADD
     | TIMESTAMPDIFF
+    | TINYINT
     | TOUCH
     | TRANSACTION
     | TRANSACTIONS
@@ -1387,9 +1461,11 @@ ansiNonReserved
     | UPDATE
     | USE
     | VALUES
+    | VARCHAR
     | VERSION
     | VIEW
     | VIEWS
+    | VOID
     | WEEK
     | WEEKS
     | WINDOW
@@ -1433,6 +1509,7 @@ nonReserved
     | AFTER
     | ALL
     | ALTER
+    | ALWAYS
     | ANALYZE
     | AND
     | ANY
@@ -1444,10 +1521,15 @@ nonReserved
     | AT
     | AUTHORIZATION
     | BETWEEN
+    | BIGINT
+    | BINARY
+    | BINARY_HEX
+    | BOOLEAN
     | BOTH
     | BUCKET
     | BUCKETS
     | BY
+    | BYTE
     | CACHE
     | CASCADE
     | CASE
@@ -1455,6 +1537,8 @@ nonReserved
     | CATALOG
     | CATALOGS
     | CHANGE
+    | CHAR
+    | CHARACTER
     | CHECK
     | CLEAR
     | CLUSTER
@@ -1482,12 +1566,15 @@ nonReserved
     | DATA
     | DATABASE
     | DATABASES
+    | DATE
     | DATEADD
     | DATEDIFF
     | DAY
     | DAYS
     | DAYOFYEAR
     | DBPROPERTIES
+    | DEC
+    | DECIMAL
     | DEFAULT
     | DEFINED
     | DELETE
@@ -1500,6 +1587,7 @@ nonReserved
     | DISTINCT
     | DISTRIBUTE
     | DIV
+    | DOUBLE
     | DROP
     | ELSE
     | END
@@ -1519,6 +1607,7 @@ nonReserved
     | FIELDS
     | FILEFORMAT
     | FIRST
+    | FLOAT
     | FOLLOWING
     | FOR
     | FOREIGN
@@ -1527,6 +1616,7 @@ nonReserved
     | FROM
     | FUNCTION
     | FUNCTIONS
+    | GENERATED
     | GLOBAL
     | GRANT
     | GROUP
@@ -1544,6 +1634,8 @@ nonReserved
     | INPATH
     | INPUTFORMAT
     | INSERT
+    | INT
+    | INTEGER
     | INTERVAL
     | INTO
     | IS
@@ -1553,6 +1645,7 @@ nonReserved
     | LAZY
     | LEADING
     | LIKE
+    | LONG
     | ILIKE
     | LIMIT
     | LINES
@@ -1563,6 +1656,7 @@ nonReserved
     | LOCK
     | LOCKS
     | LOGICAL
+    | LONG
     | MACRO
     | MAP
     | MATCHED
@@ -1584,6 +1678,7 @@ nonReserved
     | NOT
     | NULL
     | NULLS
+    | NUMERIC
     | OF
     | OFFSET
     | ONLY
@@ -1615,6 +1710,7 @@ nonReserved
     | QUARTER
     | QUERY
     | RANGE
+    | REAL
     | RECORDREADER
     | RECORDWRITER
     | RECOVER
@@ -1647,8 +1743,10 @@ nonReserved
     | SESSION_USER
     | SET
     | SETS
+    | SHORT
     | SHOW
     | SKEWED
+    | SMALLINT
     | SOME
     | SORT
     | SORTED
@@ -1657,6 +1755,7 @@ nonReserved
     | STATISTICS
     | STORED
     | STRATIFY
+    | STRING
     | STRUCT
     | SUBSTR
     | SUBSTRING
@@ -1673,8 +1772,11 @@ nonReserved
     | THEN
     | TIME
     | TIMESTAMP
+    | TIMESTAMP_LTZ
+    | TIMESTAMP_NTZ
     | TIMESTAMPADD
     | TIMESTAMPDIFF
+    | TINYINT
     | TO
     | TOUCH
     | TRAILING
@@ -1698,9 +1800,11 @@ nonReserved
     | USE
     | USER
     | VALUES
+    | VARCHAR
     | VERSION
     | VIEW
     | VIEWS
+    | VOID
     | WEEK
     | WEEKS
     | WHEN

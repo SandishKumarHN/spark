@@ -25,9 +25,8 @@ import sys
 import unittest
 
 from pyspark.sql import Row
-from pyspark.sql.functions import col
-from pyspark.sql.udf import UserDefinedFunction
-from pyspark.sql.utils import AnalysisException
+from pyspark.sql import functions as F
+from pyspark.errors import AnalysisException
 from pyspark.sql.types import (
     ByteType,
     ShortType,
@@ -36,6 +35,7 @@ from pyspark.sql.types import (
     DateType,
     TimestampType,
     DayTimeIntervalType,
+    YearMonthIntervalType,
     MapType,
     StringType,
     CharType,
@@ -68,7 +68,7 @@ from pyspark.testing.sqlutils import (
 )
 
 
-class TypesTests(ReusedSQLTestCase):
+class TypesTestsMixin:
     def test_apply_schema_to_row(self):
         df = self.spark.read.json(self.sc.parallelize(["""{"a":2}"""]))
         df2 = self.spark.createDataFrame(df.rdd.map(lambda x: x), df.schema)
@@ -235,13 +235,21 @@ class TypesTests(ReusedSQLTestCase):
         df = self.spark.createDataFrame([["a", "b"]], ["col1"])
         self.assertEqual(df.columns, ["col1", "_2"])
 
-    def test_infer_schema_fails(self):
-        with self.assertRaisesRegex(TypeError, "field a"):
-            self.spark.createDataFrame(
-                self.spark.sparkContext.parallelize([[1, 1], ["x", 1]]),
-                schema=["a", "b"],
-                samplingRatio=0.99,
-            )
+    def test_infer_schema_upcast_int_to_string(self):
+        df = self.spark.createDataFrame(
+            self.spark.sparkContext.parallelize([[1, 1], ["x", 1]]),
+            schema=["a", "b"],
+            samplingRatio=0.99,
+        )
+        self.assertEqual([Row(a="1", b=1), Row(a="x", b=1)], df.collect())
+
+    def test_infer_schema_upcast_float_to_string(self):
+        df = self.spark.createDataFrame([[1.33, 1], ["2.1", 1]], schema=["a", "b"])
+        self.assertEqual([Row(a="1.33", b=1), Row(a="2.1", b=1)], df.collect())
+
+    def test_infer_schema_upcast_boolean_to_string(self):
+        df = self.spark.createDataFrame([[True, 1], ["false", 1]], schema=["a", "b"])
+        self.assertEqual([Row(a="true", b=1), Row(a="false", b=1)], df.collect())
 
     def test_infer_nested_schema(self):
         NestedRow = Row("f1", "f2")
@@ -280,11 +288,21 @@ class TypesTests(ReusedSQLTestCase):
                 NestedRow([{"payment": 100.5, "name": "B"}], [2, 3]),
             ]
 
-            nestedRdd = self.sc.parallelize(data)
-            df = self.spark.createDataFrame(nestedRdd)
+            df = self.spark.createDataFrame(data)
             self.assertEqual(Row(f1=[Row(payment=200.5, name="A")], f2=[1, 2]), df.first())
 
-            df = self.spark.createDataFrame(data)
+    def test_infer_nested_dict_as_struct_with_rdd(self):
+        # SPARK-35929: Test inferring nested dict as a struct type.
+        NestedRow = Row("f1", "f2")
+
+        with self.sql_conf({"spark.sql.pyspark.inferNestedDictAsStruct.enabled": True}):
+            data = [
+                NestedRow([{"payment": 200.5, "name": "A"}], [1, 2]),
+                NestedRow([{"payment": 100.5, "name": "B"}], [2, 3]),
+            ]
+
+            nestedRdd = self.sc.parallelize(data)
+            df = self.spark.createDataFrame(nestedRdd)
             self.assertEqual(Row(f1=[Row(payment=200.5, name="A")], f2=[1, 2]), df.first())
 
     def test_infer_array_merge_element_types(self):
@@ -292,10 +310,6 @@ class TypesTests(ReusedSQLTestCase):
         ArrayRow = Row("f1", "f2")
 
         data = [ArrayRow([1, None], [None, 2])]
-
-        rdd = self.sc.parallelize(data)
-        df = self.spark.createDataFrame(rdd)
-        self.assertEqual(Row(f1=[1, None], f2=[None, 2]), df.first())
 
         df = self.spark.createDataFrame(data)
         self.assertEqual(Row(f1=[1, None], f2=[None, 2]), df.first())
@@ -316,8 +330,20 @@ class TypesTests(ReusedSQLTestCase):
         self.assertRaises(ValueError, lambda: self.spark.createDataFrame(data3))
 
         # an array with conflicting types should raise an error
+        # in this case this is ArrayType(StringType) and ArrayType(NullType)
         data4 = [ArrayRow([1, "1"], [None])]
-        self.assertRaises(TypeError, lambda: self.spark.createDataFrame(data4))
+        with self.assertRaisesRegex(ValueError, "types cannot be determined after inferring"):
+            self.spark.createDataFrame(data4)
+
+    def test_infer_array_merge_element_types_with_rdd(self):
+        # SPARK-39168: Test inferring array element type from all values in array
+        ArrayRow = Row("f1", "f2")
+
+        data = [ArrayRow([1, None], [None, 2])]
+
+        rdd = self.sc.parallelize(data)
+        df = self.spark.createDataFrame(rdd)
+        self.assertEqual(Row(f1=[1, None], f2=[None, 2]), df.first())
 
     def test_infer_array_element_type_empty(self):
         # SPARK-39168: Test inferring array element type from all rows
@@ -333,6 +359,7 @@ class TypesTests(ReusedSQLTestCase):
         self.assertEqual(Row(f1=[1]), rows[2])
 
         df = self.spark.createDataFrame(data)
+        rows = df.collect()
         self.assertEqual(Row(f1=[]), rows[0])
         self.assertEqual(Row(f1=[None]), rows[1])
         self.assertEqual(Row(f1=[1]), rows[2])
@@ -370,7 +397,7 @@ class TypesTests(ReusedSQLTestCase):
         try:
             self.spark.sql("set spark.sql.legacy.allowNegativeScaleOfDecimal=true")
             df = self.spark.createDataFrame([(1,), (11,)], ["value"])
-            ret = df.select(col("value").cast(DecimalType(1, -1))).collect()
+            ret = df.select(F.col("value").cast(DecimalType(1, -1))).collect()
             actual = list(map(lambda r: int(r.value), ret))
             self.assertEqual(actual, [0, 10])
         finally:
@@ -469,7 +496,7 @@ class TypesTests(ReusedSQLTestCase):
     def test_convert_row_to_dict(self):
         row = Row(l=[Row(a=1, b="s")], d={"key": Row(c=1.0, d="2")})
         self.assertEqual(1, row.asDict()["l"][0].a)
-        df = self.sc.parallelize([row]).toDF()
+        df = self.spark.createDataFrame([row])
 
         with self.tempView("test"):
             df.createOrReplaceTempView("test")
@@ -537,8 +564,6 @@ class TypesTests(ReusedSQLTestCase):
         df.collect()
 
     def test_complex_nested_udt_in_df(self):
-        from pyspark.sql.functions import udf
-
         schema = StructType().add("key", LongType()).add("val", PythonOnlyUDT())
         df = self.spark.createDataFrame(
             [(i % 3, PythonOnlyPoint(float(i), float(i))) for i in range(10)], schema=schema
@@ -547,7 +572,7 @@ class TypesTests(ReusedSQLTestCase):
 
         gd = df.groupby("key").agg({"val": "collect_list"})
         gd.collect()
-        udf = udf(lambda k, v: [(k, v[0])], ArrayType(df.schema))
+        udf = F.udf(lambda k, v: [(k, v[0])], ArrayType(df.schema))
         gd.select(udf(*gd)).collect()
 
     def test_udt_with_none(self):
@@ -584,6 +609,29 @@ class TypesTests(ReusedSQLTestCase):
             point = self.spark.sql("SELECT point FROM labeled_point").head().point
             self.assertEqual(point, PythonOnlyPoint(1.0, 2.0))
 
+    def test_infer_schema_with_udt_with_column_names(self):
+        row = (1.0, ExamplePoint(1.0, 2.0))
+        df = self.spark.createDataFrame([row], ["label", "point"])
+        schema = df.schema
+        field = [f for f in schema.fields if f.name == "point"][0]
+        self.assertEqual(type(field.dataType), ExamplePointUDT)
+
+        with self.tempView("labeled_point"):
+            df.createOrReplaceTempView("labeled_point")
+            point = self.spark.sql("SELECT point FROM labeled_point").head().point
+            self.assertEqual(point, ExamplePoint(1.0, 2.0))
+
+        row = (1.0, PythonOnlyPoint(1.0, 2.0))
+        df = self.spark.createDataFrame([row], ["label", "point"])
+        schema = df.schema
+        field = [f for f in schema.fields if f.name == "point"][0]
+        self.assertEqual(type(field.dataType), PythonOnlyUDT)
+
+        with self.tempView("labeled_point"):
+            df.createOrReplaceTempView("labeled_point")
+            point = self.spark.sql("SELECT point FROM labeled_point").head().point
+            self.assertEqual(point, PythonOnlyPoint(1.0, 2.0))
+
     def test_apply_schema_with_udt(self):
         row = (1.0, ExamplePoint(1.0, 2.0))
         schema = StructType(
@@ -607,22 +655,52 @@ class TypesTests(ReusedSQLTestCase):
         point = df.head().point
         self.assertEqual(point, PythonOnlyPoint(1.0, 2.0))
 
+    def test_apply_schema_with_nullable_udt(self):
+        rows = [(1.0, ExamplePoint(1.0, 2.0)), (2.0, None)]
+        schema = StructType(
+            [
+                StructField("label", DoubleType(), False),
+                StructField("point", ExamplePointUDT(), True),
+            ]
+        )
+        df = self.spark.createDataFrame(rows, schema)
+        points = [row.point for row in df.collect()]
+        self.assertEqual(points, [ExamplePoint(1.0, 2.0), None])
+
+        rows = [(1.0, PythonOnlyPoint(1.0, 2.0)), (2.0, None)]
+        schema = StructType(
+            [
+                StructField("label", DoubleType(), False),
+                StructField("point", PythonOnlyUDT(), True),
+            ]
+        )
+        df = self.spark.createDataFrame(rows, schema)
+        points = [row.point for row in df.collect()]
+        self.assertEqual(points, [PythonOnlyPoint(1.0, 2.0), None])
+
     def test_udf_with_udt(self):
         row = Row(label=1.0, point=ExamplePoint(1.0, 2.0))
         df = self.spark.createDataFrame([row])
-        self.assertEqual(1.0, df.rdd.map(lambda r: r.point.x).first())
-        udf = UserDefinedFunction(lambda p: p.y, DoubleType())
+        udf = F.udf(lambda p: p.y, DoubleType())
         self.assertEqual(2.0, df.select(udf(df.point)).first()[0])
-        udf2 = UserDefinedFunction(lambda p: ExamplePoint(p.x + 1, p.y + 1), ExamplePointUDT())
+        udf2 = F.udf(lambda p: ExamplePoint(p.x + 1, p.y + 1), ExamplePointUDT())
         self.assertEqual(ExamplePoint(2.0, 3.0), df.select(udf2(df.point)).first()[0])
 
         row = Row(label=1.0, point=PythonOnlyPoint(1.0, 2.0))
         df = self.spark.createDataFrame([row])
-        self.assertEqual(1.0, df.rdd.map(lambda r: r.point.x).first())
-        udf = UserDefinedFunction(lambda p: p.y, DoubleType())
+        udf = F.udf(lambda p: p.y, DoubleType())
         self.assertEqual(2.0, df.select(udf(df.point)).first()[0])
-        udf2 = UserDefinedFunction(lambda p: PythonOnlyPoint(p.x + 1, p.y + 1), PythonOnlyUDT())
+        udf2 = F.udf(lambda p: PythonOnlyPoint(p.x + 1, p.y + 1), PythonOnlyUDT())
         self.assertEqual(PythonOnlyPoint(2.0, 3.0), df.select(udf2(df.point)).first()[0])
+
+    def test_rdd_with_udt(self):
+        row = Row(label=1.0, point=ExamplePoint(1.0, 2.0))
+        df = self.spark.createDataFrame([row])
+        self.assertEqual(1.0, df.rdd.map(lambda r: r.point.x).first())
+
+        row = Row(label=1.0, point=PythonOnlyPoint(1.0, 2.0))
+        df = self.spark.createDataFrame([row])
+        self.assertEqual(1.0, df.rdd.map(lambda r: r.point.x).first())
 
     def test_parquet_with_udt(self):
         row = Row(label=1.0, point=ExamplePoint(1.0, 2.0))
@@ -662,8 +740,6 @@ class TypesTests(ReusedSQLTestCase):
         )
 
     def test_cast_to_string_with_udt(self):
-        from pyspark.sql.functions import col
-
         row = (ExamplePoint(1.0, 2.0), PythonOnlyPoint(3.0, 4.0))
         schema = StructType(
             [
@@ -673,18 +749,16 @@ class TypesTests(ReusedSQLTestCase):
         )
         df = self.spark.createDataFrame([row], schema)
 
-        result = df.select(col("point").cast("string"), col("pypoint").cast("string")).head()
+        result = df.select(F.col("point").cast("string"), F.col("pypoint").cast("string")).head()
         self.assertEqual(result, Row(point="(1.0, 2.0)", pypoint="[3.0, 4.0]"))
 
     def test_cast_to_udt_with_udt(self):
-        from pyspark.sql.functions import col
-
         row = Row(point=ExamplePoint(1.0, 2.0), python_only_point=PythonOnlyPoint(1.0, 2.0))
         df = self.spark.createDataFrame([row])
-        self.assertRaises(AnalysisException, lambda: df.select(col("point").cast(PythonOnlyUDT())))
-        self.assertRaises(
-            AnalysisException, lambda: df.select(col("python_only_point").cast(ExamplePointUDT()))
-        )
+        with self.assertRaises(AnalysisException):
+            df.select(F.col("point").cast(PythonOnlyUDT())).collect()
+        with self.assertRaises(AnalysisException):
+            df.select(F.col("python_only_point").cast(ExamplePointUDT())).collect()
 
     def test_struct_type(self):
         struct1 = StructType().add("f1", StringType(), True).add("f2", StringType(), True, None)
@@ -777,11 +851,10 @@ class TypesTests(ReusedSQLTestCase):
                 StructField("f2", StringType(), True, {"a": None}),
             ]
         )
-        rdd = self.sc.parallelize([["a", "b"], ["c", "d"]])
-        self.spark.createDataFrame(rdd, schema)
+        self.spark.createDataFrame([["a", "b"], ["c", "d"]], schema)
 
     def test_access_nested_types(self):
-        df = self.sc.parallelize([Row(l=[1], r=Row(a=1, b="b"), d={"k": "v"})]).toDF()
+        df = self.spark.createDataFrame([Row(l=[1], r=Row(a=1, b="b"), d={"k": "v"})])
         self.assertEqual(1, df.select(df.l[0]).first()[0])
         self.assertEqual(1, df.select(df.l.getItem(0)).first()[0])
         self.assertEqual(1, df.select(df.r.a).first()[0])
@@ -840,8 +913,12 @@ class TypesTests(ReusedSQLTestCase):
             _merge_type(MapType(StringType(), LongType()), MapType(StringType(), LongType())),
             MapType(StringType(), LongType()),
         )
-        with self.assertRaisesRegex(TypeError, "key of map"):
-            _merge_type(MapType(StringType(), LongType()), MapType(DoubleType(), LongType()))
+
+        self.assertEqual(
+            _merge_type(MapType(StringType(), LongType()), MapType(DoubleType(), LongType())),
+            MapType(StringType(), LongType()),
+        )
+
         with self.assertRaisesRegex(TypeError, "value of map"):
             _merge_type(MapType(StringType(), LongType()), MapType(StringType(), DoubleType()))
 
@@ -865,11 +942,13 @@ class TypesTests(ReusedSQLTestCase):
             ),
             StructType([StructField("f1", StructType([StructField("f2", LongType())]))]),
         )
-        with self.assertRaisesRegex(TypeError, "field f2 in field f1"):
+        self.assertEqual(
             _merge_type(
                 StructType([StructField("f1", StructType([StructField("f2", LongType())]))]),
                 StructType([StructField("f1", StructType([StructField("f2", StringType())]))]),
-            )
+            ),
+            StructType([StructField("f1", StructType([StructField("f2", StringType())]))]),
+        )
 
         self.assertEqual(
             _merge_type(
@@ -937,11 +1016,13 @@ class TypesTests(ReusedSQLTestCase):
             ),
             StructType([StructField("f1", ArrayType(MapType(StringType(), LongType())))]),
         )
-        with self.assertRaisesRegex(TypeError, "key of map element in array field f1"):
+        self.assertEqual(
             _merge_type(
                 StructType([StructField("f1", ArrayType(MapType(StringType(), LongType())))]),
                 StructType([StructField("f1", ArrayType(MapType(DoubleType(), LongType())))]),
-            )
+            ),
+            StructType([StructField("f1", ArrayType(MapType(StringType(), LongType())))]),
+        )
 
     # test for SPARK-16542
     def test_array_types(self):
@@ -1125,6 +1206,37 @@ class TypesTests(ReusedSQLTestCase):
 
         for n, (a, e) in enumerate(zip(actual, expected)):
             self.assertEqual(a, e, "%s does not match with %s" % (exprs[n], expected[n]))
+
+    def test_yearmonth_interval_type_constructor(self):
+        self.assertEqual(YearMonthIntervalType().simpleString(), "interval year to month")
+        self.assertEqual(
+            YearMonthIntervalType(YearMonthIntervalType.YEAR).simpleString(), "interval year"
+        )
+        self.assertEqual(
+            YearMonthIntervalType(
+                YearMonthIntervalType.YEAR, YearMonthIntervalType.MONTH
+            ).simpleString(),
+            "interval year to month",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "interval None to 3 is invalid"):
+            YearMonthIntervalType(endField=3)
+
+        with self.assertRaisesRegex(RuntimeError, "interval 123 to 123 is invalid"):
+            YearMonthIntervalType(123)
+
+        with self.assertRaisesRegex(RuntimeError, "interval 0 to 321 is invalid"):
+            YearMonthIntervalType(YearMonthIntervalType.YEAR, 321)
+
+    def test_yearmonth_interval_type(self):
+        schema1 = self.spark.sql("SELECT INTERVAL '10-8' YEAR TO MONTH AS interval").schema
+        self.assertEqual(schema1.fields[0].dataType, YearMonthIntervalType(0, 1))
+
+        schema2 = self.spark.sql("SELECT INTERVAL '10' YEAR AS interval").schema
+        self.assertEqual(schema2.fields[0].dataType, YearMonthIntervalType(0, 0))
+
+        schema3 = self.spark.sql("SELECT INTERVAL '8' MONTH AS interval").schema
+        self.assertEqual(schema3.fields[0].dataType, YearMonthIntervalType(1, 1))
 
 
 class DataTypeTests(unittest.TestCase):
@@ -1383,11 +1495,15 @@ class DataTypeVerificationTests(unittest.TestCase):
         self.assertEqual(repr(r), "Row(b=1, a=2)")
 
 
+class TypesTests(TypesTestsMixin, ReusedSQLTestCase):
+    pass
+
+
 if __name__ == "__main__":
     from pyspark.sql.tests.test_types import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

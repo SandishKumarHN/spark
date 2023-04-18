@@ -26,7 +26,7 @@ from pyspark.pandas.config import option_context
 from pyspark.pandas.tests.data_type_ops.testing_utils import OpsTestBase
 
 
-class CategoricalOpsTest(OpsTestBase):
+class CategoricalOpsTestsMixin:
     @property
     def pdf(self):
         return pd.DataFrame(
@@ -545,12 +545,16 @@ class CategoricalOpsTest(OpsTestBase):
         )
 
 
+class CategoricalOpsTests(CategoricalOpsTestsMixin, OpsTestBase):
+    pass
+
+
 if __name__ == "__main__":
     import unittest
     from pyspark.pandas.tests.data_type_ops.test_categorical_ops import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

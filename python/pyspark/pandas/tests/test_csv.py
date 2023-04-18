@@ -31,9 +31,9 @@ def normalize_text(s):
     return "\n".join(map(str.strip, s.strip().split("\n")))
 
 
-class CsvTest(PandasOnSparkTestCase, TestUtils):
+class CsvTestsMixin:
     def setUp(self):
-        self.tmp_dir = tempfile.mkdtemp(prefix=CsvTest.__name__)
+        self.tmp_dir = tempfile.mkdtemp(prefix=CsvTests.__name__)
 
     def tearDown(self):
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
@@ -430,12 +430,16 @@ class CsvTest(PandasOnSparkTestCase, TestUtils):
                 self.assertEqual(f.read(), expected)
 
 
+class CsvTests(CsvTestsMixin, PandasOnSparkTestCase, TestUtils):
+    pass
+
+
 if __name__ == "__main__":
     import unittest
     from pyspark.pandas.tests.test_csv import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

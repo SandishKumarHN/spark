@@ -24,7 +24,7 @@ from pyspark.testing.pandasutils import PandasOnSparkTestCase, TestUtils
 from pyspark.pandas.window import Rolling
 
 
-class RollingTest(PandasOnSparkTestCase, TestUtils):
+class RollingTestsMixin:
     def test_rolling_error(self):
         with self.assertRaisesRegex(ValueError, "window must be >= 0"):
             ps.range(10).rolling(window=-1)
@@ -237,12 +237,16 @@ class RollingTest(PandasOnSparkTestCase, TestUtils):
         self._test_groupby_rolling_func("kurt")
 
 
+class RollingTests(RollingTestsMixin, PandasOnSparkTestCase, TestUtils):
+    pass
+
+
 if __name__ == "__main__":
     import unittest
     from pyspark.pandas.tests.test_rolling import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

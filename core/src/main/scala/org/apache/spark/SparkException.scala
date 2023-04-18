@@ -68,11 +68,17 @@ class SparkException(
 }
 
 object SparkException {
-  def internalError(msg: String): SparkException = {
+  def internalError(msg: String, context: Array[QueryContext], summary: String): SparkException = {
     new SparkException(
       errorClass = "INTERNAL_ERROR",
       messageParameters = Map("message" -> msg),
-      cause = null)
+      cause = null,
+      context,
+      summary)
+  }
+
+  def internalError(msg: String): SparkException = {
+    internalError(msg, context = Array.empty[QueryContext], summary = "")
   }
 
   def internalError(msg: String, cause: Throwable): SparkException = {
@@ -284,6 +290,25 @@ private[spark] class SparkRuntimeException(
   override def getMessageParameters: java.util.Map[String, String] = messageParameters.asJava
 
   override def getErrorClass: String = errorClass
+  override def getQueryContext: Array[QueryContext] = context
+}
+
+/**
+ * No such element exception thrown from Spark with an error class.
+ */
+private[spark] class SparkNoSuchElementException(
+    errorClass: String,
+    messageParameters: Map[String, String],
+    context: Array[QueryContext] = Array.empty,
+    summary: String = "")
+    extends NoSuchElementException(
+      SparkThrowableHelper.getMessage(errorClass, messageParameters, summary))
+    with SparkThrowable {
+
+  override def getMessageParameters: java.util.Map[String, String] = messageParameters.asJava
+
+  override def getErrorClass: String = errorClass
+
   override def getQueryContext: Array[QueryContext] = context
 }
 

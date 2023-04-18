@@ -26,7 +26,7 @@ from pyspark.testing.pandasutils import PandasOnSparkTestCase
 from pyspark.testing.sqlutils import SQLTestUtils
 
 
-class SeriesDateTimeTest(PandasOnSparkTestCase, SQLTestUtils):
+class SeriesDateTimeTestsMixin:
     @property
     def pdf1(self):
         date1 = pd.Series(pd.date_range("2012-1-1 12:45:31", periods=3, freq="M"))
@@ -283,11 +283,15 @@ class SeriesDateTimeTest(PandasOnSparkTestCase, SQLTestUtils):
         )
 
 
+class SeriesDateTimeTests(SeriesDateTimeTestsMixin, PandasOnSparkTestCase, SQLTestUtils):
+    pass
+
+
 if __name__ == "__main__":
     from pyspark.pandas.tests.test_series_datetime import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

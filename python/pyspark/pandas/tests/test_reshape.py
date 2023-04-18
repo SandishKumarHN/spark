@@ -24,11 +24,11 @@ import pandas as pd
 
 from pyspark import pandas as ps
 from pyspark.pandas.utils import name_like_string
-from pyspark.sql.utils import AnalysisException
+from pyspark.errors import AnalysisException
 from pyspark.testing.pandasutils import PandasOnSparkTestCase
 
 
-class ReshapeTest(PandasOnSparkTestCase):
+class ReshapeTestsMixin:
     def test_get_dummies(self):
         for pdf_or_ps in [
             pd.Series([1, 1, 1, 2, 2, 1, 3, 4]),
@@ -464,7 +464,7 @@ class ReshapeTest(PandasOnSparkTestCase):
         with self.assertRaisesRegex(ValueError, "can only asof on a key for right"):
             ps.merge_asof(psdf_left, psdf_right, right_on=["a", "b"], left_on="a")
         with self.assertRaisesRegex(
-            ValueError, 'Can only pass argument "on" OR "left_by" and "right_by".'
+            ValueError, 'Can only pass argument "by" OR "left_by" and "right_by".'
         ):
             ps.merge_asof(psdf_left, psdf_right, on="a", by="b", left_by="a")
         with self.assertRaisesRegex(ValueError, "missing right_by"):
@@ -478,12 +478,16 @@ class ReshapeTest(PandasOnSparkTestCase):
             ps.merge_asof(psdf_left, psdf_right)
 
 
+class ReshapeTests(ReshapeTestsMixin, PandasOnSparkTestCase):
+    pass
+
+
 if __name__ == "__main__":
     import unittest
     from pyspark.pandas.tests.test_reshape import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

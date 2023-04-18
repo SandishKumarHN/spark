@@ -29,7 +29,7 @@ from pyspark.testing.pandasutils import PandasOnSparkTestCase, SPARK_CONF_ARROW_
 from pyspark.testing.sqlutils import SQLTestUtils
 
 
-class StatsTest(PandasOnSparkTestCase, SQLTestUtils):
+class StatsTestsMixin:
     def _test_stat_functions(self, pdf_or_pser, psdf_or_psser):
         functions = ["max", "min", "mean", "sum", "count"]
         for funcname in functions:
@@ -549,12 +549,16 @@ class StatsTest(PandasOnSparkTestCase, SQLTestUtils):
             psdf.s.sum()
 
 
+class StatsTests(StatsTestsMixin, PandasOnSparkTestCase, SQLTestUtils):
+    pass
+
+
 if __name__ == "__main__":
     import unittest
     from pyspark.pandas.tests.test_stats import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

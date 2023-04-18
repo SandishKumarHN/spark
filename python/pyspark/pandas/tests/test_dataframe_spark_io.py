@@ -27,7 +27,7 @@ from pyspark import pandas as ps
 from pyspark.testing.pandasutils import PandasOnSparkTestCase, TestUtils
 
 
-class DataFrameSparkIOTest(PandasOnSparkTestCase, TestUtils):
+class DataFrameSparkIOTestsMixin:
     """Test cases for big data I/O using Spark."""
 
     @property
@@ -471,11 +471,15 @@ class DataFrameSparkIOTest(PandasOnSparkTestCase, TestUtils):
             )
 
 
+class DataFrameSparkIOTests(DataFrameSparkIOTestsMixin, PandasOnSparkTestCase, TestUtils):
+    pass
+
+
 if __name__ == "__main__":
     from pyspark.pandas.tests.test_dataframe_spark_io import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

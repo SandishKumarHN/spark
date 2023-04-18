@@ -21,7 +21,7 @@ import pyspark.pandas as ps
 from pyspark.testing.pandasutils import PandasOnSparkTestCase, TestUtils
 
 
-class GenericFunctionsTest(PandasOnSparkTestCase, TestUtils):
+class GenericFunctionsTestsMixin:
     def test_interpolate_error(self):
         psdf = ps.range(10)
 
@@ -217,12 +217,16 @@ class GenericFunctionsTest(PandasOnSparkTestCase, TestUtils):
         self.assert_eq(pdf.prod(skipna=False, min_count=3), psdf.prod(skipna=False, min_count=3))
 
 
+class GenericFunctionsTests(GenericFunctionsTestsMixin, PandasOnSparkTestCase, TestUtils):
+    pass
+
+
 if __name__ == "__main__":
     import unittest
     from pyspark.pandas.tests.test_generic_functions import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

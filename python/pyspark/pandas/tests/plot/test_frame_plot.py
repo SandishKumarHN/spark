@@ -25,7 +25,7 @@ from pyspark.pandas.exceptions import PandasNotImplementedError
 from pyspark.testing.pandasutils import PandasOnSparkTestCase
 
 
-class DataFramePlotTest(PandasOnSparkTestCase):
+class DataFramePlotTestsMixin:
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -153,12 +153,16 @@ class DataFramePlotTest(PandasOnSparkTestCase):
         check_box_multi_columns(-psdf)
 
 
+class DataFramePlotTests(DataFramePlotTestsMixin, PandasOnSparkTestCase):
+    pass
+
+
 if __name__ == "__main__":
     import unittest
     from pyspark.pandas.tests.plot.test_frame_plot import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

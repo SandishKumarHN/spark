@@ -49,7 +49,7 @@ from pandas.api.types import (  # type: ignore[attr-defined]
 from pandas.tseries.offsets import DateOffset
 import pyarrow as pa
 import pyarrow.parquet as pq
-from pyspark.sql import functions as F, Column, DataFrame as SparkDataFrame
+from pyspark.sql import functions as F, Column
 from pyspark.sql.functions import pandas_udf
 from pyspark.sql.types import (
     ByteType,
@@ -69,7 +69,7 @@ from pyspark.sql.types import (
 )
 
 from pyspark import pandas as ps
-from pyspark.pandas._typing import Axis, Dtype, Label, Name
+from pyspark.pandas._typing import Axis, Dtype, Label, Name, GenericDataFrame
 from pyspark.pandas.base import IndexOpsMixin
 from pyspark.pandas.utils import (
     align_diff_frames,
@@ -94,6 +94,8 @@ from pyspark.pandas.spark.utils import as_nullable_spark_type, force_decimal_pre
 from pyspark.pandas.indexes import Index, DatetimeIndex, TimedeltaIndex
 from pyspark.pandas.indexes.multi import MultiIndex
 
+# For Supporting Spark Connect
+from pyspark.sql.connect.column import Column as ConnectColumn
 
 __all__ = [
     "from_pandas",
@@ -169,7 +171,7 @@ def range(
     from ``start`` to ``end`` (exclusive) with step value ``step``. If only the first parameter
     (i.e. start) is specified, we treat it as the end value with the start value being 0.
 
-    This is similar to the range function in SparkSession and is used primarily for testing.
+    This is like the range function in SparkSession and is used primarily for testing.
 
     Parameters
     ----------
@@ -239,7 +241,7 @@ def read_csv(
     sep : str, default ‘,’
         Delimiter to use. Non empty string.
     header : int, default ‘infer’
-        Whether to to use as the column names, and the start of the data.
+        Whether to use the column names, and the start of the data.
         Default behavior is to infer the column names: if no names are passed
         the behavior is identical to `header=0` and column names are inferred from
         the first line of the file, if column names are passed explicitly then
@@ -261,11 +263,17 @@ def read_csv(
         returning names where the callable function evaluates to `True`.
     squeeze : bool, default False
         If the parsed data only contains one column then return a Series.
+
+        .. deprecated:: 3.4.0
+
     mangle_dupe_cols : bool, default True
         Duplicate columns will be specified as 'X0', 'X1', ... 'XN', rather
         than 'X' ... 'X'. Passing in False will cause data to be overwritten if
         there are duplicate names in the columns.
         Currently only `True` is allowed.
+
+        .. deprecated:: 3.4.0
+
     dtype : Type name or dict of column -> type, default None
         Data type for data or columns. E.g. {‘a’: np.float64, ‘b’: np.int32} Use str or object
         together with suitable na_values settings to preserve and not interpret dtype.
@@ -474,7 +482,7 @@ def read_json(
     path : string
         File path
     lines : bool, default True
-        Read the file as a json object per line. It should be always True for now.
+        Read the file as a JSON object per line. It should be always True for now.
     index_col : str or list of str, optional, default: None
         Index column of table in Spark.
     options : dict
@@ -978,6 +986,9 @@ def read_excel(
           column if the callable returns ``True``.
     squeeze : bool, default False
         If the parsed data only contains one column then return a Series.
+
+        .. deprecated:: 3.4.0
+
     dtype : Type name or dict of column -> type, default None
         Data type for data or columns. E.g. {'a': np.float64, 'b': np.int32}
         Use `object` to preserve data as stored in Excel and not interpret dtype.
@@ -1049,10 +1060,16 @@ def read_excel(
         Convert integral floats to int (i.e., 1.0 --> 1). If False, all numeric
         data will be read in as floats: Excel stores all numbers as floats
         internally.
+
+        .. deprecated:: 3.4.0
+
     mangle_dupe_cols : bool, default True
         Duplicate columns will be specified as 'X', 'X.1', ...'X.N', rather than
         'X'...'X'. Passing in False will cause data to be overwritten if there
         are duplicate names in the columns.
+
+        .. deprecated:: 3.4.0
+
     **kwds : optional
         Optional keyword arguments can be passed to ``TextFileReader``.
 
@@ -1250,7 +1267,7 @@ def read_html(
     ----------
     io : str or file-like
         A URL, a file-like object, or a raw string containing HTML. Note that
-        lxml only accepts the http, ftp and file url protocols. If you have a
+        lxml only accepts the http, FTP and file URL protocols. If you have a
         URL that starts with ``'https'`` you might try removing the ``'s'``.
 
     match : str or compiled regular expression, optional
@@ -1382,7 +1399,7 @@ def read_sql_table(
     table_name : str
         Name of SQL table in database.
     con : str
-        A JDBC URI could be provided as as str.
+        A JDBC URI could be provided as str.
 
         .. note:: The URI must be JDBC URI instead of Python's database URI.
 
@@ -1451,7 +1468,7 @@ def read_sql_query(
     sql : string SQL query
         SQL query to be executed.
     con : str
-        A JDBC URI could be provided as as str.
+        A JDBC URI could be provided as str.
 
         .. note:: The URI must be JDBC URI instead of Python's database URI.
 
@@ -1514,7 +1531,7 @@ def read_sql(
     sql : string
         SQL query to be executed or a table name.
     con : str
-        A JDBC URI could be provided as as str.
+        A JDBC URI could be provided as str.
 
         .. note:: The URI must be JDBC URI instead of Python's database URI.
 
@@ -1733,6 +1750,8 @@ def to_datetime(
     )
 
 
+# TODO(SPARK-42621): Add `inclusive` parameter and replace `closed`.
+# See https://github.com/pandas-dev/pandas/issues/40245
 def date_range(
     start: Union[str, Any] = None,
     end: Union[str, Any] = None,
@@ -1760,7 +1779,7 @@ def date_range(
     tz : str or tzinfo, optional
         Time zone name for returning localized DatetimeIndex, for example
         'Asia/Hong_Kong'. By default, the resulting DatetimeIndex is
-        timezone-naive.
+        time zone naive.
     normalize : bool, default False
         Normalize start/end dates to midnight before generating date range.
     name : str, default None
@@ -1768,6 +1787,9 @@ def date_range(
     closed : {None, 'left', 'right'}, optional
         Make the interval closed with respect to the given frequency to
         the 'left', 'right', or both sides (None, the default).
+
+        .. deprecated:: 3.4.0
+
     **kwargs
         For compatibility. Has no effect on the result.
 
@@ -2168,9 +2190,8 @@ def get_dummies(
     if sparse is not False:
         raise NotImplementedError("get_dummies currently does not support sparse")
 
-    if columns is not None:
-        if not is_list_like(columns):
-            raise TypeError("Input must be a list-like for parameter `columns`")
+    if columns is not None and not is_list_like(columns):
+        raise TypeError("Input must be a list-like for parameter `columns`")
 
     if dtype is None:
         dtype = "byte"
@@ -2633,7 +2654,7 @@ def concat(
             for psdf in new_objs:
                 columns_to_add = list(set(merged_columns) - set(psdf._internal.column_labels))
 
-                # TODO: NaN and None difference for missing values. pandas seems filling NaN.
+                # TODO: NaN and None difference for missing values. pandas seems to be filling NaN.
                 sdf = psdf._internal.resolved_copy.spark_frame
                 for label in columns_to_add:
                     sdf = sdf.withColumn(name_like_string(label), F.lit(None))
@@ -2900,13 +2921,13 @@ def merge(
     how: Type of merge to be performed.
         {'left', 'right', 'outer', 'inner'}, default 'inner'
 
-        left: use only keys from left frame, similar to a SQL left outer join; preserve key
+        left: use only keys from left frame, like a SQL left outer join; preserve key
             order.
-        right: use only keys from right frame, similar to a SQL right outer join; preserve key
+        right: use only keys from right frame, like a SQL right outer join; preserve key
             order.
-        outer: use union of keys from both frames, similar to a SQL full outer join; sort keys
+        outer: use union of keys from both frames, like a SQL full outer join; sort keys
             lexicographically.
-        inner: use intersection of keys from both frames, similar to a SQL inner join;
+        inner: use intersection of keys from both frames, like a SQL inner join;
             preserve the order of the left keys.
     on: Column or index level names to join on. These must be found in both DataFrames. If on
         is None and not merging on indexes then this defaults to the intersection of the
@@ -3024,7 +3045,7 @@ def merge_asof(
     """
     Perform an asof merge.
 
-    This is similar to a left-join except that we match on nearest
+    This is like a left-join except that we match on nearest
     key rather than equal keys.
 
     For each row in the left DataFrame:
@@ -3035,7 +3056,7 @@ def merge_asof(
       - A "forward" search selects the first row in the right DataFrame whose
         'on' key is greater than or equal to the left's key.
 
-      - A "nearest" search selects the row in the right DataFrame whose 'on'
+      - A "nearest" search selects the row in the right DataFrame who's 'on'
         key is closest in absolute distance to the left's key.
 
     Optionally match on equivalent keys with 'by' before searching with 'on'.
@@ -3048,7 +3069,7 @@ def merge_asof(
     right : DataFrame or named Series
     on : label
         Field name to join on. Must be found in both DataFrames.
-        The data MUST be ordered. Furthermore this must be a numeric column,
+        The data MUST be ordered. This must be a numeric column,
         such as datetimelike, integer, or float. On or left_on/right_on
         must be given.
     left_on : label
@@ -3338,7 +3359,7 @@ def merge_asof(
 
     if by:
         if left_by or right_by:
-            raise ValueError('Can only pass argument "on" OR "left_by" and "right_by".')
+            raise ValueError('Can only pass argument "by" OR "left_by" and "right_by".')
         left_join_on_names = list(map(left._internal.spark_column_name_for, to_list(by)))
         right_join_on_names = list(map(right._internal.spark_column_name_for, to_list(by)))
     else:
@@ -3407,7 +3428,7 @@ def merge_asof(
     else:
         on = None
 
-    if tolerance is not None and not isinstance(tolerance, Column):
+    if tolerance is not None and not isinstance(tolerance, (Column, ConnectColumn)):
         tolerance = F.lit(tolerance)
 
     as_of_joined_table = left_table._joinAsOf(
@@ -3700,7 +3721,7 @@ def read_orc(
 
 
 def _get_index_map(
-    sdf: SparkDataFrame, index_col: Optional[Union[str, List[str]]] = None
+    sdf: GenericDataFrame, index_col: Optional[Union[str, List[str]]] = None
 ) -> Tuple[Optional[List[Column]], Optional[List[Label]]]:
     index_spark_columns: Optional[List[Column]]
     index_names: Optional[List[Label]]

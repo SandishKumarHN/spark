@@ -32,7 +32,7 @@ from pyspark.pandas.typedef.typehints import (
 )
 
 
-class BooleanOpsTest(OpsTestBase):
+class BooleanOpsTestsMixin:
     @property
     def bool_pdf(self):
         return pd.DataFrame({"this": [True, False, True], "that": [False, True, True]})
@@ -809,11 +809,15 @@ class BooleanExtensionOpsTest(OpsTestBase):
         self.check_extension(pser >= pser, psser >= psser)
 
 
+class BooleanOpsTests(BooleanOpsTestsMixin, OpsTestBase):
+    pass
+
+
 if __name__ == "__main__":
     from pyspark.pandas.tests.data_type_ops.test_boolean_ops import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

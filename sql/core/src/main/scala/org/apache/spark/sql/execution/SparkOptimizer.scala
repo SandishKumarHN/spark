@@ -51,12 +51,15 @@ class SparkOptimizer(
     Batch("Optimize Metadata Only Query", Once, OptimizeMetadataOnlyQuery(catalog)) :+
     Batch("PartitionPruning", Once,
       PartitionPruning,
-      RowLevelOperationRuntimeGroupFiltering,
-      OptimizeSubqueries) :+
+      // We can't run `OptimizeSubqueries` in this batch, as it will optimize the subqueries
+      // twice which may break some optimizer rules that can only be applied once. The rule below
+      // only invokes `OptimizeSubqueries` to optimize newly added subqueries.
+      new RowLevelOperationRuntimeGroupFiltering(OptimizeSubqueries)) :+
     Batch("InjectRuntimeFilter", FixedPoint(1),
       InjectRuntimeFilter) :+
     Batch("MergeScalarSubqueries", Once,
-      MergeScalarSubqueries) :+
+      MergeScalarSubqueries,
+      RewriteDistinctAggregates) :+
     Batch("Pushdown Filters from PartitionPruning", fixedPoint,
       PushDownPredicates) :+
     Batch("Cleanup filters that cannot be pushed down", Once,
@@ -77,8 +80,15 @@ class SparkOptimizer(
       // The eval-python node may be between Project/Filter and the scan node, which breaks
       // column pruning and filter push-down. Here we rerun the related optimizer rules.
       ColumnPruning,
+      LimitPushDown,
       PushPredicateThroughNonJoin,
+      PushProjectionThroughLimit,
       RemoveNoopOperators) :+
+    Batch("Infer window group limit", Once,
+      InferWindowGroupLimit,
+      LimitPushDown,
+      LimitPushDownThroughWindow,
+      EliminateLimits) :+
     Batch("User Provided Optimizers", fixedPoint, experimentalMethods.extraOptimizations: _*) :+
     Batch("Replace CTE with Repartition", Once, ReplaceCTERefWithRepartition)
 

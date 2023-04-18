@@ -25,9 +25,10 @@ import org.json4s.JsonDSL._
 
 import org.apache.spark.annotation.Stable
 import org.apache.spark.sql.catalyst.analysis.Resolver
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, InterpretedOrdering}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.catalyst.parser.{CatalystSqlParser, LegacyTypeStringParser}
 import org.apache.spark.sql.catalyst.trees.Origin
+import org.apache.spark.sql.catalyst.types.DataTypeUtils
 import org.apache.spark.sql.catalyst.util.{truncatedString, StringUtils}
 import org.apache.spark.sql.catalyst.util.ResolveDefaultColumns._
 import org.apache.spark.sql.catalyst.util.StringUtils.StringConcat
@@ -391,8 +392,7 @@ case class StructType(fields: Array[StructField]) extends DataType with Seq[Stru
     findField(this, fieldNames, Nil)
   }
 
-  protected[sql] def toAttributes: Seq[AttributeReference] =
-    map(f => AttributeReference(f.name, f.dataType, f.nullable, f.metadata)())
+  protected[sql] def toAttributes: Seq[AttributeReference] = map(field => field.toAttribute)
 
   def treeString: String = treeString(Int.MaxValue)
 
@@ -510,10 +510,6 @@ case class StructType(fields: Array[StructField]) extends DataType with Seq[Stru
     f(this) || fields.exists(field => field.dataType.existsRecursively(f))
   }
 
-  @transient
-  private[sql] lazy val interpretedOrdering =
-    InterpretedOrdering.forSchema(this.fields.map(_.dataType))
-
   /**
    * These define and cache existence default values for the struct fields for efficiency purposes.
    */
@@ -555,7 +551,7 @@ object StructType extends AbstractDataType {
 
   def apply(fields: java.util.List[StructField]): StructType = {
     import scala.collection.JavaConverters._
-    StructType(fields.asScala.toSeq)
+    StructType(fields.asScala.toArray)
   }
 
   private[sql] def fromAttributes(attributes: Seq[Attribute]): StructType =
@@ -589,7 +585,7 @@ object StructType extends AbstractDataType {
           leftField.copy(
             dataType = unionLikeMerge(leftField.dataType, rightField.dataType),
             nullable = leftField.nullable || rightField.nullable)
-      }.toSeq
+      }
       StructType(newFields)
     })
 
@@ -610,7 +606,8 @@ object StructType extends AbstractDataType {
                   nullable = leftNullable || rightNullable)
               } catch {
                 case NonFatal(e) =>
-                  throw QueryExecutionErrors.failedMergingFieldsError(leftName, rightName, e)
+                  throw QueryExecutionErrors.cannotMergeIncompatibleDataTypesError(
+                    leftType, rightType)
               }
             }
             .orElse {
@@ -626,7 +623,7 @@ object StructType extends AbstractDataType {
           newFields += f
         }
 
-      StructType(newFields.toSeq)
+      StructType(newFields.toArray)
     })
 
   private def mergeInternal(
@@ -701,7 +698,7 @@ object StructType extends AbstractDataType {
         // Found a missing field in `source`.
         newFields += field
       } else if (bothStructType(found.get.dataType, field.dataType) &&
-          !found.get.dataType.sameType(field.dataType)) {
+          !DataTypeUtils.sameType(found.get.dataType, field.dataType)) {
         // Found a field with same name, but different data type.
         findMissingFields(found.get.dataType.asInstanceOf[StructType],
           field.dataType.asInstanceOf[StructType], resolver).map { missingType =>
@@ -713,7 +710,7 @@ object StructType extends AbstractDataType {
     if (newFields.isEmpty) {
       None
     } else {
-      Some(StructType(newFields.toSeq))
+      Some(StructType(newFields.toArray))
     }
   }
 }

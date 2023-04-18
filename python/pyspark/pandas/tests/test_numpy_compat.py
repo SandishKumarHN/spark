@@ -25,7 +25,7 @@ from pyspark.testing.pandasutils import ComparisonTestBase
 from pyspark.testing.sqlutils import SQLTestUtils
 
 
-class NumPyCompatTest(ComparisonTestBase, SQLTestUtils):
+class NumPyCompatTestsMixin:
     blacklist = [
         # Koalas does not currently support
         "conj",
@@ -183,12 +183,16 @@ class NumPyCompatTest(ComparisonTestBase, SQLTestUtils):
             reset_option("compute.ops_on_diff_frames")
 
 
+class NumPyCompatTests(NumPyCompatTestsMixin, ComparisonTestBase, SQLTestUtils):
+    pass
+
+
 if __name__ == "__main__":
     import unittest
     from pyspark.pandas.tests.test_numpy_compat import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

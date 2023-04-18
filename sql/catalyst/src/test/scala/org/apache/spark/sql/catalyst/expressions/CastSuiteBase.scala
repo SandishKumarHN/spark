@@ -29,6 +29,7 @@ import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult.DataTypeMismatch
 import org.apache.spark.sql.catalyst.analysis.TypeCoercion.numericPrecedence
+import org.apache.spark.sql.catalyst.expressions.Cast._
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenContext
 import org.apache.spark.sql.catalyst.util.DateTimeConstants._
 import org.apache.spark.sql.catalyst.util.DateTimeTestUtils._
@@ -542,18 +543,74 @@ abstract class CastSuiteBase extends SparkFunSuite with ExpressionEvalHelper {
   }
 
   protected def checkInvalidCastFromNumericType(to: DataType): Unit = {
-    assert(cast(1.toByte, to).checkInputDataTypes().isFailure)
-    assert(cast(1.toShort, to).checkInputDataTypes().isFailure)
-    assert(cast(1, to).checkInputDataTypes().isFailure)
-    assert(cast(1L, to).checkInputDataTypes().isFailure)
-    assert(cast(1.0.toFloat, to).checkInputDataTypes().isFailure)
-    assert(cast(1.0, to).checkInputDataTypes().isFailure)
+    cast(1.toByte, to).checkInputDataTypes() ==
+      DataTypeMismatch(
+        errorSubClass = "CAST_WITH_FUNC_SUGGESTION",
+        messageParameters = Map(
+          "srcType" -> toSQLType(Literal(1.toByte).dataType),
+          "targetType" -> toSQLType(to),
+          "functionNames" -> "`DATE_FROM_UNIX_DATE`"
+        )
+      )
+    cast(1.toShort, to).checkInputDataTypes() ==
+      DataTypeMismatch(
+        errorSubClass = "CAST_WITH_FUNC_SUGGESTION",
+        messageParameters = Map(
+          "srcType" -> toSQLType(Literal(1.toShort).dataType),
+          "targetType" -> toSQLType(to),
+          "functionNames" -> "`DATE_FROM_UNIX_DATE`"
+        )
+      )
+    cast(1, to).checkInputDataTypes() ==
+      DataTypeMismatch(
+        errorSubClass = "CAST_WITH_FUNC_SUGGESTION",
+        messageParameters = Map(
+          "srcType" -> toSQLType(Literal(1).dataType),
+          "targetType" -> toSQLType(to),
+          "functionNames" -> "`DATE_FROM_UNIX_DATE`"
+        )
+      )
+    cast(1L, to).checkInputDataTypes() ==
+      DataTypeMismatch(
+        errorSubClass = "CAST_WITH_FUNC_SUGGESTION",
+        messageParameters = Map(
+          "srcType" -> toSQLType(Literal(1L).dataType),
+          "targetType" -> toSQLType(to),
+          "functionNames" -> "`DATE_FROM_UNIX_DATE`"
+        )
+      )
+    cast(1.0.toFloat, to).checkInputDataTypes() ==
+      DataTypeMismatch(
+        errorSubClass = "CAST_WITH_FUNC_SUGGESTION",
+        messageParameters = Map(
+          "srcType" -> toSQLType(Literal(1.0.toFloat).dataType),
+          "targetType" -> toSQLType(to),
+          "functionNames" -> "`DATE_FROM_UNIX_DATE`"
+        )
+      )
+    cast(1.0, to).checkInputDataTypes() ==
+      DataTypeMismatch(
+        errorSubClass = "CAST_WITH_FUNC_SUGGESTION",
+        messageParameters = Map(
+          "srcType" -> toSQLType(Literal(1.0).dataType),
+          "targetType" -> toSQLType(to),
+          "functionNames" -> "`DATE_FROM_UNIX_DATE`"
+        )
+      )
   }
 
   test("SPARK-16729 type checking for casting to date type") {
     assert(cast("1234", DateType).checkInputDataTypes().isSuccess)
     assert(cast(new Timestamp(1), DateType).checkInputDataTypes().isSuccess)
-    assert(cast(false, DateType).checkInputDataTypes().isFailure)
+    assert(cast(false, DateType).checkInputDataTypes() ==
+      DataTypeMismatch(
+        errorSubClass = "CAST_WITHOUT_SUGGESTION",
+        messageParameters = Map(
+          "srcType" -> "\"BOOLEAN\"",
+          "targetType" -> "\"DATE\""
+        )
+      )
+    )
     checkInvalidCastFromNumericType(DateType)
   }
 
@@ -663,6 +720,15 @@ abstract class CastSuiteBase extends SparkFunSuite with ExpressionEvalHelper {
         assert(Cast.canUpCast(from, to))
       }
     }
+
+    {
+      assert(Cast.canUpCast(DateType, TimestampType))
+      assert(Cast.canUpCast(DateType, TimestampNTZType))
+      assert(Cast.canUpCast(TimestampType, TimestampNTZType))
+      assert(Cast.canUpCast(TimestampNTZType, TimestampType))
+      assert(!Cast.canUpCast(TimestampType, DateType))
+      assert(!Cast.canUpCast(TimestampNTZType, DateType))
+    }
   }
 
   test("SPARK-40389: canUpCast: return false if casting decimal to integral types can cause" +
@@ -718,7 +784,7 @@ abstract class CastSuiteBase extends SparkFunSuite with ExpressionEvalHelper {
     Seq(false, true).foreach { omitNull =>
       withSQLConf(SQLConf.LEGACY_COMPLEX_TYPES_TO_STRING.key -> omitNull.toString) {
         val ret3 = cast(Literal.create(Array("ab", null, "c")), StringType)
-        checkEvaluation(ret3, s"[ab,${if (omitNull) "" else " null"}, c]")
+        checkEvaluation(ret3, s"[ab,${if (omitNull) "" else " NULL"}, c]")
       }
     }
     val ret4 =
@@ -747,7 +813,7 @@ abstract class CastSuiteBase extends SparkFunSuite with ExpressionEvalHelper {
         val ret1 = cast(Literal.create(Array(null, null)), StringType)
         checkEvaluation(
           ret1,
-          s"[${if (omitNull) "" else "null"},${if (omitNull) "" else " null"}]")
+          s"[${if (omitNull) "" else "NULL"},${if (omitNull) "" else " NULL"}]")
       }
     }
   }
@@ -762,7 +828,7 @@ abstract class CastSuiteBase extends SparkFunSuite with ExpressionEvalHelper {
         val ret2 = cast(
           Literal.create(Map("1" -> "a".getBytes, "2" -> null, "3" -> "c".getBytes)),
           StringType)
-        checkEvaluation(ret2, s"${lb}1 -> a, 2 ->${if (legacyCast) "" else " null"}, 3 -> c$rb")
+        checkEvaluation(ret2, s"${lb}1 -> a, 2 ->${if (legacyCast) "" else " NULL"}, 3 -> c$rb")
         val ret3 = cast(
           Literal.create(Map(
             1 -> Date.valueOf("2014-12-03"),
@@ -794,7 +860,7 @@ abstract class CastSuiteBase extends SparkFunSuite with ExpressionEvalHelper {
         val ret1 = cast(Literal.create((1, "a", 0.1)), StringType)
         checkEvaluation(ret1, s"${lb}1, a, 0.1$rb")
         val ret2 = cast(Literal.create(Tuple3[Int, String, String](1, null, "a")), StringType)
-        checkEvaluation(ret2, s"${lb}1,${if (legacyCast) "" else " null"}, a$rb")
+        checkEvaluation(ret2, s"${lb}1,${if (legacyCast) "" else " NULL"}, a$rb")
         val ret3 = cast(Literal.create(
           (Date.valueOf("2014-12-03"), Timestamp.valueOf("2014-12-03 15:05:00"))), StringType)
         checkEvaluation(ret3, s"${lb}2014-12-03, 2014-12-03 15:05:00$rb")
@@ -816,7 +882,7 @@ abstract class CastSuiteBase extends SparkFunSuite with ExpressionEvalHelper {
         val ret1 = cast(Literal.create(Tuple2[String, String](null, null)), StringType)
         checkEvaluation(
           ret1,
-          s"$lb${if (legacyCast) "" else "null"},${if (legacyCast) "" else " null"}$rb")
+          s"$lb${if (legacyCast) "" else "NULL"},${if (legacyCast) "" else " NULL"}$rb")
       }
     }
   }

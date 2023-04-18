@@ -35,12 +35,14 @@ limitations under the License.
 """
 import builtins
 import collections.abc
+import google.protobuf.any_pb2
 import google.protobuf.descriptor
 import google.protobuf.internal.containers
 import google.protobuf.internal.enum_type_wrapper
 import google.protobuf.message
+import pyspark.sql.connect.proto.common_pb2
+import pyspark.sql.connect.proto.expressions_pb2
 import pyspark.sql.connect.proto.relations_pb2
-import pyspark.sql.connect.proto.types_pb2
 import sys
 import typing
 
@@ -58,21 +60,51 @@ class Command(google.protobuf.message.Message):
 
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
-    CREATE_FUNCTION_FIELD_NUMBER: builtins.int
+    REGISTER_FUNCTION_FIELD_NUMBER: builtins.int
     WRITE_OPERATION_FIELD_NUMBER: builtins.int
     CREATE_DATAFRAME_VIEW_FIELD_NUMBER: builtins.int
+    WRITE_OPERATION_V2_FIELD_NUMBER: builtins.int
+    SQL_COMMAND_FIELD_NUMBER: builtins.int
+    WRITE_STREAM_OPERATION_START_FIELD_NUMBER: builtins.int
+    STREAMING_QUERY_COMMAND_FIELD_NUMBER: builtins.int
+    GET_RESOURCES_COMMAND_FIELD_NUMBER: builtins.int
+    EXTENSION_FIELD_NUMBER: builtins.int
     @property
-    def create_function(self) -> global___CreateScalarFunction: ...
+    def register_function(
+        self,
+    ) -> pyspark.sql.connect.proto.expressions_pb2.CommonInlineUserDefinedFunction: ...
     @property
     def write_operation(self) -> global___WriteOperation: ...
     @property
     def create_dataframe_view(self) -> global___CreateDataFrameViewCommand: ...
+    @property
+    def write_operation_v2(self) -> global___WriteOperationV2: ...
+    @property
+    def sql_command(self) -> global___SqlCommand: ...
+    @property
+    def write_stream_operation_start(self) -> global___WriteStreamOperationStart: ...
+    @property
+    def streaming_query_command(self) -> global___StreamingQueryCommand: ...
+    @property
+    def get_resources_command(self) -> global___GetResourcesCommand: ...
+    @property
+    def extension(self) -> google.protobuf.any_pb2.Any:
+        """This field is used to mark extensions to the protocol. When plugins generate arbitrary
+        Commands they can add them here. During the planning the correct resolution is done.
+        """
     def __init__(
         self,
         *,
-        create_function: global___CreateScalarFunction | None = ...,
+        register_function: pyspark.sql.connect.proto.expressions_pb2.CommonInlineUserDefinedFunction
+        | None = ...,
         write_operation: global___WriteOperation | None = ...,
         create_dataframe_view: global___CreateDataFrameViewCommand | None = ...,
+        write_operation_v2: global___WriteOperationV2 | None = ...,
+        sql_command: global___SqlCommand | None = ...,
+        write_stream_operation_start: global___WriteStreamOperationStart | None = ...,
+        streaming_query_command: global___StreamingQueryCommand | None = ...,
+        get_resources_command: global___GetResourcesCommand | None = ...,
+        extension: google.protobuf.any_pb2.Any | None = ...,
     ) -> None: ...
     def HasField(
         self,
@@ -81,10 +113,22 @@ class Command(google.protobuf.message.Message):
             b"command_type",
             "create_dataframe_view",
             b"create_dataframe_view",
-            "create_function",
-            b"create_function",
+            "extension",
+            b"extension",
+            "get_resources_command",
+            b"get_resources_command",
+            "register_function",
+            b"register_function",
+            "sql_command",
+            b"sql_command",
+            "streaming_query_command",
+            b"streaming_query_command",
             "write_operation",
             b"write_operation",
+            "write_operation_v2",
+            b"write_operation_v2",
+            "write_stream_operation_start",
+            b"write_stream_operation_start",
         ],
     ) -> builtins.bool: ...
     def ClearField(
@@ -94,131 +138,97 @@ class Command(google.protobuf.message.Message):
             b"command_type",
             "create_dataframe_view",
             b"create_dataframe_view",
-            "create_function",
-            b"create_function",
+            "extension",
+            b"extension",
+            "get_resources_command",
+            b"get_resources_command",
+            "register_function",
+            b"register_function",
+            "sql_command",
+            b"sql_command",
+            "streaming_query_command",
+            b"streaming_query_command",
             "write_operation",
             b"write_operation",
+            "write_operation_v2",
+            b"write_operation_v2",
+            "write_stream_operation_start",
+            b"write_stream_operation_start",
         ],
     ) -> None: ...
     def WhichOneof(
         self, oneof_group: typing_extensions.Literal["command_type", b"command_type"]
     ) -> typing_extensions.Literal[
-        "create_function", "write_operation", "create_dataframe_view"
+        "register_function",
+        "write_operation",
+        "create_dataframe_view",
+        "write_operation_v2",
+        "sql_command",
+        "write_stream_operation_start",
+        "streaming_query_command",
+        "get_resources_command",
+        "extension",
     ] | None: ...
 
 global___Command = Command
 
-class CreateScalarFunction(google.protobuf.message.Message):
-    """Simple message that is used to create a scalar function based on the provided function body.
+class SqlCommand(google.protobuf.message.Message):
+    """A SQL Command is used to trigger the eager evaluation of SQL commands in Spark.
 
-    This message is used to register for example a Python UDF in the session catalog by providing
-    the serialized method body.
-
-    TODO(SPARK-40532) It is required to add the interpreter / language version to the command
-      parameters.
+    When the SQL provide as part of the message is a command it will be immediately evaluated
+    and the result will be collected and returned as part of a LocalRelation. If the result is
+    not a command, the operation will simply return a SQL Relation. This allows the client to be
+    almost oblivious to the server-side behavior.
     """
 
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
-    class _FunctionLanguage:
-        ValueType = typing.NewType("ValueType", builtins.int)
-        V: typing_extensions.TypeAlias = ValueType
+    class ArgsEntry(google.protobuf.message.Message):
+        DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
-    class _FunctionLanguageEnumTypeWrapper(
-        google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[
-            CreateScalarFunction._FunctionLanguage.ValueType
-        ],
-        builtins.type,
-    ):  # noqa: F821
-        DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
-        FUNCTION_LANGUAGE_UNSPECIFIED: CreateScalarFunction._FunctionLanguage.ValueType  # 0
-        FUNCTION_LANGUAGE_SQL: CreateScalarFunction._FunctionLanguage.ValueType  # 1
-        FUNCTION_LANGUAGE_PYTHON: CreateScalarFunction._FunctionLanguage.ValueType  # 2
-        FUNCTION_LANGUAGE_SCALA: CreateScalarFunction._FunctionLanguage.ValueType  # 3
+        KEY_FIELD_NUMBER: builtins.int
+        VALUE_FIELD_NUMBER: builtins.int
+        key: builtins.str
+        @property
+        def value(self) -> pyspark.sql.connect.proto.expressions_pb2.Expression.Literal: ...
+        def __init__(
+            self,
+            *,
+            key: builtins.str = ...,
+            value: pyspark.sql.connect.proto.expressions_pb2.Expression.Literal | None = ...,
+        ) -> None: ...
+        def HasField(
+            self, field_name: typing_extensions.Literal["value", b"value"]
+        ) -> builtins.bool: ...
+        def ClearField(
+            self, field_name: typing_extensions.Literal["key", b"key", "value", b"value"]
+        ) -> None: ...
 
-    class FunctionLanguage(_FunctionLanguage, metaclass=_FunctionLanguageEnumTypeWrapper): ...
-    FUNCTION_LANGUAGE_UNSPECIFIED: CreateScalarFunction.FunctionLanguage.ValueType  # 0
-    FUNCTION_LANGUAGE_SQL: CreateScalarFunction.FunctionLanguage.ValueType  # 1
-    FUNCTION_LANGUAGE_PYTHON: CreateScalarFunction.FunctionLanguage.ValueType  # 2
-    FUNCTION_LANGUAGE_SCALA: CreateScalarFunction.FunctionLanguage.ValueType  # 3
-
-    PARTS_FIELD_NUMBER: builtins.int
-    LANGUAGE_FIELD_NUMBER: builtins.int
-    TEMPORARY_FIELD_NUMBER: builtins.int
-    ARGUMENT_TYPES_FIELD_NUMBER: builtins.int
-    RETURN_TYPE_FIELD_NUMBER: builtins.int
-    SERIALIZED_FUNCTION_FIELD_NUMBER: builtins.int
-    LITERAL_STRING_FIELD_NUMBER: builtins.int
+    SQL_FIELD_NUMBER: builtins.int
+    ARGS_FIELD_NUMBER: builtins.int
+    sql: builtins.str
+    """(Required) SQL Query."""
     @property
-    def parts(
+    def args(
         self,
-    ) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]:
-        """Fully qualified name of the function including the catalog / schema names."""
-    language: global___CreateScalarFunction.FunctionLanguage.ValueType
-    temporary: builtins.bool
-    @property
-    def argument_types(
-        self,
-    ) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[
-        pyspark.sql.connect.proto.types_pb2.DataType
-    ]: ...
-    @property
-    def return_type(self) -> pyspark.sql.connect.proto.types_pb2.DataType: ...
-    serialized_function: builtins.bytes
-    """As a raw string serialized:"""
-    literal_string: builtins.str
-    """As a code literal"""
+    ) -> google.protobuf.internal.containers.MessageMap[
+        builtins.str, pyspark.sql.connect.proto.expressions_pb2.Expression.Literal
+    ]:
+        """(Optional) A map of parameter names to literal expressions."""
     def __init__(
         self,
         *,
-        parts: collections.abc.Iterable[builtins.str] | None = ...,
-        language: global___CreateScalarFunction.FunctionLanguage.ValueType = ...,
-        temporary: builtins.bool = ...,
-        argument_types: collections.abc.Iterable[pyspark.sql.connect.proto.types_pb2.DataType]
+        sql: builtins.str = ...,
+        args: collections.abc.Mapping[
+            builtins.str, pyspark.sql.connect.proto.expressions_pb2.Expression.Literal
+        ]
         | None = ...,
-        return_type: pyspark.sql.connect.proto.types_pb2.DataType | None = ...,
-        serialized_function: builtins.bytes = ...,
-        literal_string: builtins.str = ...,
     ) -> None: ...
-    def HasField(
-        self,
-        field_name: typing_extensions.Literal[
-            "function_definition",
-            b"function_definition",
-            "literal_string",
-            b"literal_string",
-            "return_type",
-            b"return_type",
-            "serialized_function",
-            b"serialized_function",
-        ],
-    ) -> builtins.bool: ...
     def ClearField(
-        self,
-        field_name: typing_extensions.Literal[
-            "argument_types",
-            b"argument_types",
-            "function_definition",
-            b"function_definition",
-            "language",
-            b"language",
-            "literal_string",
-            b"literal_string",
-            "parts",
-            b"parts",
-            "return_type",
-            b"return_type",
-            "serialized_function",
-            b"serialized_function",
-            "temporary",
-            b"temporary",
-        ],
+        self, field_name: typing_extensions.Literal["args", b"args", "sql", b"sql"]
     ) -> None: ...
-    def WhichOneof(
-        self, oneof_group: typing_extensions.Literal["function_definition", b"function_definition"]
-    ) -> typing_extensions.Literal["serialized_function", "literal_string"] | None: ...
 
-global___CreateScalarFunction = CreateScalarFunction
+global___SqlCommand = SqlCommand
 
 class CreateDataFrameViewCommand(google.protobuf.message.Message):
     """A command that can create DataFrame global temp view or local temp view."""
@@ -231,13 +241,13 @@ class CreateDataFrameViewCommand(google.protobuf.message.Message):
     REPLACE_FIELD_NUMBER: builtins.int
     @property
     def input(self) -> pyspark.sql.connect.proto.relations_pb2.Relation:
-        """Required. The relation that this view will be built on."""
+        """(Required) The relation that this view will be built on."""
     name: builtins.str
-    """Required. View name."""
+    """(Required) View name."""
     is_global: builtins.bool
-    """Required. Whether this is global temp view or local temp view."""
+    """(Required) Whether this is global temp view or local temp view."""
     replace: builtins.bool
-    """Required.
+    """(Required)
 
     If true, and if the view already exists, updates it; if false, and if the view
     already exists, throws exception.
@@ -308,6 +318,48 @@ class WriteOperation(google.protobuf.message.Message):
             self, field_name: typing_extensions.Literal["key", b"key", "value", b"value"]
         ) -> None: ...
 
+    class SaveTable(google.protobuf.message.Message):
+        DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+        class _TableSaveMethod:
+            ValueType = typing.NewType("ValueType", builtins.int)
+            V: typing_extensions.TypeAlias = ValueType
+
+        class _TableSaveMethodEnumTypeWrapper(
+            google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[
+                WriteOperation.SaveTable._TableSaveMethod.ValueType
+            ],
+            builtins.type,
+        ):  # noqa: F821
+            DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
+            TABLE_SAVE_METHOD_UNSPECIFIED: WriteOperation.SaveTable._TableSaveMethod.ValueType  # 0
+            TABLE_SAVE_METHOD_SAVE_AS_TABLE: WriteOperation.SaveTable._TableSaveMethod.ValueType  # 1
+            TABLE_SAVE_METHOD_INSERT_INTO: WriteOperation.SaveTable._TableSaveMethod.ValueType  # 2
+
+        class TableSaveMethod(_TableSaveMethod, metaclass=_TableSaveMethodEnumTypeWrapper): ...
+        TABLE_SAVE_METHOD_UNSPECIFIED: WriteOperation.SaveTable.TableSaveMethod.ValueType  # 0
+        TABLE_SAVE_METHOD_SAVE_AS_TABLE: WriteOperation.SaveTable.TableSaveMethod.ValueType  # 1
+        TABLE_SAVE_METHOD_INSERT_INTO: WriteOperation.SaveTable.TableSaveMethod.ValueType  # 2
+
+        TABLE_NAME_FIELD_NUMBER: builtins.int
+        SAVE_METHOD_FIELD_NUMBER: builtins.int
+        table_name: builtins.str
+        """(Required) The table name."""
+        save_method: global___WriteOperation.SaveTable.TableSaveMethod.ValueType
+        """(Required) The method to be called to write to the table."""
+        def __init__(
+            self,
+            *,
+            table_name: builtins.str = ...,
+            save_method: global___WriteOperation.SaveTable.TableSaveMethod.ValueType = ...,
+        ) -> None: ...
+        def ClearField(
+            self,
+            field_name: typing_extensions.Literal[
+                "save_method", b"save_method", "table_name", b"table_name"
+            ],
+        ) -> None: ...
+
     class BucketBy(google.protobuf.message.Message):
         DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
@@ -334,7 +386,7 @@ class WriteOperation(google.protobuf.message.Message):
     INPUT_FIELD_NUMBER: builtins.int
     SOURCE_FIELD_NUMBER: builtins.int
     PATH_FIELD_NUMBER: builtins.int
-    TABLE_NAME_FIELD_NUMBER: builtins.int
+    TABLE_FIELD_NUMBER: builtins.int
     MODE_FIELD_NUMBER: builtins.int
     SORT_COLUMN_NAMES_FIELD_NUMBER: builtins.int
     PARTITIONING_COLUMNS_FIELD_NUMBER: builtins.int
@@ -342,37 +394,39 @@ class WriteOperation(google.protobuf.message.Message):
     OPTIONS_FIELD_NUMBER: builtins.int
     @property
     def input(self) -> pyspark.sql.connect.proto.relations_pb2.Relation:
-        """The output of the `input` relation will be persisted according to the options."""
+        """(Required) The output of the `input` relation will be persisted according to the options."""
     source: builtins.str
-    """Format value according to the Spark documentation. Examples are: text, parquet, delta."""
+    """(Optional) Format value according to the Spark documentation. Examples are: text, parquet, delta."""
     path: builtins.str
-    table_name: builtins.str
+    @property
+    def table(self) -> global___WriteOperation.SaveTable: ...
     mode: global___WriteOperation.SaveMode.ValueType
+    """(Required) the save mode."""
     @property
     def sort_column_names(
         self,
     ) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]:
-        """List of columns to sort the output by."""
+        """(Optional) List of columns to sort the output by."""
     @property
     def partitioning_columns(
         self,
     ) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]:
-        """List of columns for partitioning."""
+        """(Optional) List of columns for partitioning."""
     @property
     def bucket_by(self) -> global___WriteOperation.BucketBy:
-        """Optional bucketing specification. Bucketing must set the number of buckets and the columns
+        """(Optional) Bucketing specification. Bucketing must set the number of buckets and the columns
         to bucket by.
         """
     @property
     def options(self) -> google.protobuf.internal.containers.ScalarMap[builtins.str, builtins.str]:
-        """Optional list of configuration options."""
+        """(Optional) A list of configuration options."""
     def __init__(
         self,
         *,
         input: pyspark.sql.connect.proto.relations_pb2.Relation | None = ...,
-        source: builtins.str = ...,
+        source: builtins.str | None = ...,
         path: builtins.str = ...,
-        table_name: builtins.str = ...,
+        table: global___WriteOperation.SaveTable | None = ...,
         mode: global___WriteOperation.SaveMode.ValueType = ...,
         sort_column_names: collections.abc.Iterable[builtins.str] | None = ...,
         partitioning_columns: collections.abc.Iterable[builtins.str] | None = ...,
@@ -382,6 +436,8 @@ class WriteOperation(google.protobuf.message.Message):
     def HasField(
         self,
         field_name: typing_extensions.Literal[
+            "_source",
+            b"_source",
             "bucket_by",
             b"bucket_by",
             "input",
@@ -390,13 +446,17 @@ class WriteOperation(google.protobuf.message.Message):
             b"path",
             "save_type",
             b"save_type",
-            "table_name",
-            b"table_name",
+            "source",
+            b"source",
+            "table",
+            b"table",
         ],
     ) -> builtins.bool: ...
     def ClearField(
         self,
         field_name: typing_extensions.Literal[
+            "_source",
+            b"_source",
             "bucket_by",
             b"bucket_by",
             "input",
@@ -415,12 +475,675 @@ class WriteOperation(google.protobuf.message.Message):
             b"sort_column_names",
             "source",
             b"source",
+            "table",
+            b"table",
+        ],
+    ) -> None: ...
+    @typing.overload
+    def WhichOneof(
+        self, oneof_group: typing_extensions.Literal["_source", b"_source"]
+    ) -> typing_extensions.Literal["source"] | None: ...
+    @typing.overload
+    def WhichOneof(
+        self, oneof_group: typing_extensions.Literal["save_type", b"save_type"]
+    ) -> typing_extensions.Literal["path", "table"] | None: ...
+
+global___WriteOperation = WriteOperation
+
+class WriteOperationV2(google.protobuf.message.Message):
+    """As writes are not directly handled during analysis and planning, they are modeled as commands."""
+
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    class _Mode:
+        ValueType = typing.NewType("ValueType", builtins.int)
+        V: typing_extensions.TypeAlias = ValueType
+
+    class _ModeEnumTypeWrapper(
+        google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[
+            WriteOperationV2._Mode.ValueType
+        ],
+        builtins.type,
+    ):  # noqa: F821
+        DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
+        MODE_UNSPECIFIED: WriteOperationV2._Mode.ValueType  # 0
+        MODE_CREATE: WriteOperationV2._Mode.ValueType  # 1
+        MODE_OVERWRITE: WriteOperationV2._Mode.ValueType  # 2
+        MODE_OVERWRITE_PARTITIONS: WriteOperationV2._Mode.ValueType  # 3
+        MODE_APPEND: WriteOperationV2._Mode.ValueType  # 4
+        MODE_REPLACE: WriteOperationV2._Mode.ValueType  # 5
+        MODE_CREATE_OR_REPLACE: WriteOperationV2._Mode.ValueType  # 6
+
+    class Mode(_Mode, metaclass=_ModeEnumTypeWrapper): ...
+    MODE_UNSPECIFIED: WriteOperationV2.Mode.ValueType  # 0
+    MODE_CREATE: WriteOperationV2.Mode.ValueType  # 1
+    MODE_OVERWRITE: WriteOperationV2.Mode.ValueType  # 2
+    MODE_OVERWRITE_PARTITIONS: WriteOperationV2.Mode.ValueType  # 3
+    MODE_APPEND: WriteOperationV2.Mode.ValueType  # 4
+    MODE_REPLACE: WriteOperationV2.Mode.ValueType  # 5
+    MODE_CREATE_OR_REPLACE: WriteOperationV2.Mode.ValueType  # 6
+
+    class OptionsEntry(google.protobuf.message.Message):
+        DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+        KEY_FIELD_NUMBER: builtins.int
+        VALUE_FIELD_NUMBER: builtins.int
+        key: builtins.str
+        value: builtins.str
+        def __init__(
+            self,
+            *,
+            key: builtins.str = ...,
+            value: builtins.str = ...,
+        ) -> None: ...
+        def ClearField(
+            self, field_name: typing_extensions.Literal["key", b"key", "value", b"value"]
+        ) -> None: ...
+
+    class TablePropertiesEntry(google.protobuf.message.Message):
+        DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+        KEY_FIELD_NUMBER: builtins.int
+        VALUE_FIELD_NUMBER: builtins.int
+        key: builtins.str
+        value: builtins.str
+        def __init__(
+            self,
+            *,
+            key: builtins.str = ...,
+            value: builtins.str = ...,
+        ) -> None: ...
+        def ClearField(
+            self, field_name: typing_extensions.Literal["key", b"key", "value", b"value"]
+        ) -> None: ...
+
+    INPUT_FIELD_NUMBER: builtins.int
+    TABLE_NAME_FIELD_NUMBER: builtins.int
+    PROVIDER_FIELD_NUMBER: builtins.int
+    PARTITIONING_COLUMNS_FIELD_NUMBER: builtins.int
+    OPTIONS_FIELD_NUMBER: builtins.int
+    TABLE_PROPERTIES_FIELD_NUMBER: builtins.int
+    MODE_FIELD_NUMBER: builtins.int
+    OVERWRITE_CONDITION_FIELD_NUMBER: builtins.int
+    @property
+    def input(self) -> pyspark.sql.connect.proto.relations_pb2.Relation:
+        """(Required) The output of the `input` relation will be persisted according to the options."""
+    table_name: builtins.str
+    """(Required) The destination of the write operation must be either a path or a table."""
+    provider: builtins.str
+    """(Optional) A provider for the underlying output data source. Spark's default catalog supports
+    "parquet", "json", etc.
+    """
+    @property
+    def partitioning_columns(
+        self,
+    ) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[
+        pyspark.sql.connect.proto.expressions_pb2.Expression
+    ]:
+        """(Optional) List of columns for partitioning for output table created by `create`,
+        `createOrReplace`, or `replace`
+        """
+    @property
+    def options(self) -> google.protobuf.internal.containers.ScalarMap[builtins.str, builtins.str]:
+        """(Optional) A list of configuration options."""
+    @property
+    def table_properties(
+        self,
+    ) -> google.protobuf.internal.containers.ScalarMap[builtins.str, builtins.str]:
+        """(Optional) A list of table properties."""
+    mode: global___WriteOperationV2.Mode.ValueType
+    """(Required) Write mode."""
+    @property
+    def overwrite_condition(self) -> pyspark.sql.connect.proto.expressions_pb2.Expression:
+        """(Optional) A condition for overwrite saving mode"""
+    def __init__(
+        self,
+        *,
+        input: pyspark.sql.connect.proto.relations_pb2.Relation | None = ...,
+        table_name: builtins.str = ...,
+        provider: builtins.str | None = ...,
+        partitioning_columns: collections.abc.Iterable[
+            pyspark.sql.connect.proto.expressions_pb2.Expression
+        ]
+        | None = ...,
+        options: collections.abc.Mapping[builtins.str, builtins.str] | None = ...,
+        table_properties: collections.abc.Mapping[builtins.str, builtins.str] | None = ...,
+        mode: global___WriteOperationV2.Mode.ValueType = ...,
+        overwrite_condition: pyspark.sql.connect.proto.expressions_pb2.Expression | None = ...,
+    ) -> None: ...
+    def HasField(
+        self,
+        field_name: typing_extensions.Literal[
+            "_provider",
+            b"_provider",
+            "input",
+            b"input",
+            "overwrite_condition",
+            b"overwrite_condition",
+            "provider",
+            b"provider",
+        ],
+    ) -> builtins.bool: ...
+    def ClearField(
+        self,
+        field_name: typing_extensions.Literal[
+            "_provider",
+            b"_provider",
+            "input",
+            b"input",
+            "mode",
+            b"mode",
+            "options",
+            b"options",
+            "overwrite_condition",
+            b"overwrite_condition",
+            "partitioning_columns",
+            b"partitioning_columns",
+            "provider",
+            b"provider",
             "table_name",
             b"table_name",
+            "table_properties",
+            b"table_properties",
         ],
     ) -> None: ...
     def WhichOneof(
-        self, oneof_group: typing_extensions.Literal["save_type", b"save_type"]
-    ) -> typing_extensions.Literal["path", "table_name"] | None: ...
+        self, oneof_group: typing_extensions.Literal["_provider", b"_provider"]
+    ) -> typing_extensions.Literal["provider"] | None: ...
 
-global___WriteOperation = WriteOperation
+global___WriteOperationV2 = WriteOperationV2
+
+class WriteStreamOperationStart(google.protobuf.message.Message):
+    """Starts write stream operation as streaming query. Query ID and Run ID of the streaming
+    query are returned.
+    """
+
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    class OptionsEntry(google.protobuf.message.Message):
+        DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+        KEY_FIELD_NUMBER: builtins.int
+        VALUE_FIELD_NUMBER: builtins.int
+        key: builtins.str
+        value: builtins.str
+        def __init__(
+            self,
+            *,
+            key: builtins.str = ...,
+            value: builtins.str = ...,
+        ) -> None: ...
+        def ClearField(
+            self, field_name: typing_extensions.Literal["key", b"key", "value", b"value"]
+        ) -> None: ...
+
+    INPUT_FIELD_NUMBER: builtins.int
+    FORMAT_FIELD_NUMBER: builtins.int
+    OPTIONS_FIELD_NUMBER: builtins.int
+    PARTITIONING_COLUMN_NAMES_FIELD_NUMBER: builtins.int
+    PROCESSING_TIME_INTERVAL_FIELD_NUMBER: builtins.int
+    AVAILABLE_NOW_FIELD_NUMBER: builtins.int
+    ONCE_FIELD_NUMBER: builtins.int
+    CONTINUOUS_CHECKPOINT_INTERVAL_FIELD_NUMBER: builtins.int
+    OUTPUT_MODE_FIELD_NUMBER: builtins.int
+    QUERY_NAME_FIELD_NUMBER: builtins.int
+    PATH_FIELD_NUMBER: builtins.int
+    TABLE_NAME_FIELD_NUMBER: builtins.int
+    @property
+    def input(self) -> pyspark.sql.connect.proto.relations_pb2.Relation:
+        """(Required) The output of the `input` streaming relation will be written."""
+    format: builtins.str
+    """The following fields directly map to API for DataStreamWriter().
+    Consult API documentation unless explicitly documented here.
+    """
+    @property
+    def options(
+        self,
+    ) -> google.protobuf.internal.containers.ScalarMap[builtins.str, builtins.str]: ...
+    @property
+    def partitioning_column_names(
+        self,
+    ) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]: ...
+    processing_time_interval: builtins.str
+    available_now: builtins.bool
+    once: builtins.bool
+    continuous_checkpoint_interval: builtins.str
+    output_mode: builtins.str
+    query_name: builtins.str
+    path: builtins.str
+    table_name: builtins.str
+    def __init__(
+        self,
+        *,
+        input: pyspark.sql.connect.proto.relations_pb2.Relation | None = ...,
+        format: builtins.str = ...,
+        options: collections.abc.Mapping[builtins.str, builtins.str] | None = ...,
+        partitioning_column_names: collections.abc.Iterable[builtins.str] | None = ...,
+        processing_time_interval: builtins.str = ...,
+        available_now: builtins.bool = ...,
+        once: builtins.bool = ...,
+        continuous_checkpoint_interval: builtins.str = ...,
+        output_mode: builtins.str = ...,
+        query_name: builtins.str = ...,
+        path: builtins.str = ...,
+        table_name: builtins.str = ...,
+    ) -> None: ...
+    def HasField(
+        self,
+        field_name: typing_extensions.Literal[
+            "available_now",
+            b"available_now",
+            "continuous_checkpoint_interval",
+            b"continuous_checkpoint_interval",
+            "input",
+            b"input",
+            "once",
+            b"once",
+            "path",
+            b"path",
+            "processing_time_interval",
+            b"processing_time_interval",
+            "sink_destination",
+            b"sink_destination",
+            "table_name",
+            b"table_name",
+            "trigger",
+            b"trigger",
+        ],
+    ) -> builtins.bool: ...
+    def ClearField(
+        self,
+        field_name: typing_extensions.Literal[
+            "available_now",
+            b"available_now",
+            "continuous_checkpoint_interval",
+            b"continuous_checkpoint_interval",
+            "format",
+            b"format",
+            "input",
+            b"input",
+            "once",
+            b"once",
+            "options",
+            b"options",
+            "output_mode",
+            b"output_mode",
+            "partitioning_column_names",
+            b"partitioning_column_names",
+            "path",
+            b"path",
+            "processing_time_interval",
+            b"processing_time_interval",
+            "query_name",
+            b"query_name",
+            "sink_destination",
+            b"sink_destination",
+            "table_name",
+            b"table_name",
+            "trigger",
+            b"trigger",
+        ],
+    ) -> None: ...
+    @typing.overload
+    def WhichOneof(
+        self, oneof_group: typing_extensions.Literal["sink_destination", b"sink_destination"]
+    ) -> typing_extensions.Literal["path", "table_name"] | None: ...
+    @typing.overload
+    def WhichOneof(
+        self, oneof_group: typing_extensions.Literal["trigger", b"trigger"]
+    ) -> typing_extensions.Literal[
+        "processing_time_interval", "available_now", "once", "continuous_checkpoint_interval"
+    ] | None: ...
+
+global___WriteStreamOperationStart = WriteStreamOperationStart
+
+class WriteStreamOperationStartResult(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    QUERY_ID_FIELD_NUMBER: builtins.int
+    NAME_FIELD_NUMBER: builtins.int
+    @property
+    def query_id(self) -> global___StreamingQueryInstanceId:
+        """(Required) Query instance. See `StreamingQueryInstanceId`."""
+    name: builtins.str
+    """An optional query name."""
+    def __init__(
+        self,
+        *,
+        query_id: global___StreamingQueryInstanceId | None = ...,
+        name: builtins.str = ...,
+    ) -> None: ...
+    def HasField(
+        self, field_name: typing_extensions.Literal["query_id", b"query_id"]
+    ) -> builtins.bool: ...
+    def ClearField(
+        self, field_name: typing_extensions.Literal["name", b"name", "query_id", b"query_id"]
+    ) -> None: ...
+
+global___WriteStreamOperationStartResult = WriteStreamOperationStartResult
+
+class StreamingQueryInstanceId(google.protobuf.message.Message):
+    """A tuple that uniquely identifies an instance of streaming query run. It consists of `id` that
+    persists across the streaming runs and `run_id` that changes between each run of the
+    streaming query that resumes from the checkpoint.
+    """
+
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    ID_FIELD_NUMBER: builtins.int
+    RUN_ID_FIELD_NUMBER: builtins.int
+    id: builtins.str
+    """(Required) The unique id of this query that persists across restarts from checkpoint data.
+    That is, this id is generated when a query is started for the first time, and
+    will be the same every time it is restarted from checkpoint data.
+    """
+    run_id: builtins.str
+    """(Required) The unique id of this run of the query. That is, every start/restart of a query
+    will generate a unique run_id. Therefore, every time a query is restarted from
+    checkpoint, it will have the same `id` but different `run_id`s.
+    """
+    def __init__(
+        self,
+        *,
+        id: builtins.str = ...,
+        run_id: builtins.str = ...,
+    ) -> None: ...
+    def ClearField(
+        self, field_name: typing_extensions.Literal["id", b"id", "run_id", b"run_id"]
+    ) -> None: ...
+
+global___StreamingQueryInstanceId = StreamingQueryInstanceId
+
+class StreamingQueryCommand(google.protobuf.message.Message):
+    """Commands for a streaming query."""
+
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    class ExplainCommand(google.protobuf.message.Message):
+        DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+        EXTENDED_FIELD_NUMBER: builtins.int
+        extended: builtins.bool
+        """TODO: Consider reusing Explain from AnalyzePlanRequest message.
+              We can not do this right now since it base.proto imports this file.
+        """
+        def __init__(
+            self,
+            *,
+            extended: builtins.bool = ...,
+        ) -> None: ...
+        def ClearField(
+            self, field_name: typing_extensions.Literal["extended", b"extended"]
+        ) -> None: ...
+
+    QUERY_ID_FIELD_NUMBER: builtins.int
+    STATUS_FIELD_NUMBER: builtins.int
+    LAST_PROGRESS_FIELD_NUMBER: builtins.int
+    RECENT_PROGRESS_FIELD_NUMBER: builtins.int
+    STOP_FIELD_NUMBER: builtins.int
+    PROCESS_ALL_AVAILABLE_FIELD_NUMBER: builtins.int
+    EXPLAIN_FIELD_NUMBER: builtins.int
+    @property
+    def query_id(self) -> global___StreamingQueryInstanceId:
+        """(Required) Query instance. See `StreamingQueryInstanceId`."""
+    status: builtins.bool
+    """status() API."""
+    last_progress: builtins.bool
+    """lastProgress() API."""
+    recent_progress: builtins.bool
+    """recentProgress() API."""
+    stop: builtins.bool
+    """stop() API. Stops the query."""
+    process_all_available: builtins.bool
+    """processAllAvailable() API. Waits till all the available data is processed"""
+    @property
+    def explain(self) -> global___StreamingQueryCommand.ExplainCommand:
+        """explain() API. Returns logical and physical plans."""
+    def __init__(
+        self,
+        *,
+        query_id: global___StreamingQueryInstanceId | None = ...,
+        status: builtins.bool = ...,
+        last_progress: builtins.bool = ...,
+        recent_progress: builtins.bool = ...,
+        stop: builtins.bool = ...,
+        process_all_available: builtins.bool = ...,
+        explain: global___StreamingQueryCommand.ExplainCommand | None = ...,
+    ) -> None: ...
+    def HasField(
+        self,
+        field_name: typing_extensions.Literal[
+            "command",
+            b"command",
+            "explain",
+            b"explain",
+            "last_progress",
+            b"last_progress",
+            "process_all_available",
+            b"process_all_available",
+            "query_id",
+            b"query_id",
+            "recent_progress",
+            b"recent_progress",
+            "status",
+            b"status",
+            "stop",
+            b"stop",
+        ],
+    ) -> builtins.bool: ...
+    def ClearField(
+        self,
+        field_name: typing_extensions.Literal[
+            "command",
+            b"command",
+            "explain",
+            b"explain",
+            "last_progress",
+            b"last_progress",
+            "process_all_available",
+            b"process_all_available",
+            "query_id",
+            b"query_id",
+            "recent_progress",
+            b"recent_progress",
+            "status",
+            b"status",
+            "stop",
+            b"stop",
+        ],
+    ) -> None: ...
+    def WhichOneof(
+        self, oneof_group: typing_extensions.Literal["command", b"command"]
+    ) -> typing_extensions.Literal[
+        "status", "last_progress", "recent_progress", "stop", "process_all_available", "explain"
+    ] | None: ...
+
+global___StreamingQueryCommand = StreamingQueryCommand
+
+class StreamingQueryCommandResult(google.protobuf.message.Message):
+    """Response for commands on a streaming query."""
+
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    class StatusResult(google.protobuf.message.Message):
+        DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+        STATUS_MESSAGE_FIELD_NUMBER: builtins.int
+        IS_DATA_AVAILABLE_FIELD_NUMBER: builtins.int
+        IS_TRIGGER_ACTIVE_FIELD_NUMBER: builtins.int
+        IS_ACTIVE_FIELD_NUMBER: builtins.int
+        status_message: builtins.str
+        """See documentation for these Scala 'StreamingQueryStatus' struct"""
+        is_data_available: builtins.bool
+        is_trigger_active: builtins.bool
+        is_active: builtins.bool
+        def __init__(
+            self,
+            *,
+            status_message: builtins.str = ...,
+            is_data_available: builtins.bool = ...,
+            is_trigger_active: builtins.bool = ...,
+            is_active: builtins.bool = ...,
+        ) -> None: ...
+        def ClearField(
+            self,
+            field_name: typing_extensions.Literal[
+                "is_active",
+                b"is_active",
+                "is_data_available",
+                b"is_data_available",
+                "is_trigger_active",
+                b"is_trigger_active",
+                "status_message",
+                b"status_message",
+            ],
+        ) -> None: ...
+
+    class RecentProgressResult(google.protobuf.message.Message):
+        DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+        RECENT_PROGRESS_JSON_FIELD_NUMBER: builtins.int
+        @property
+        def recent_progress_json(
+            self,
+        ) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]:
+            """Progress reports as an array of json strings."""
+        def __init__(
+            self,
+            *,
+            recent_progress_json: collections.abc.Iterable[builtins.str] | None = ...,
+        ) -> None: ...
+        def ClearField(
+            self,
+            field_name: typing_extensions.Literal["recent_progress_json", b"recent_progress_json"],
+        ) -> None: ...
+
+    class ExplainResult(google.protobuf.message.Message):
+        DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+        RESULT_FIELD_NUMBER: builtins.int
+        result: builtins.str
+        """Logical and physical plans as string"""
+        def __init__(
+            self,
+            *,
+            result: builtins.str = ...,
+        ) -> None: ...
+        def ClearField(
+            self, field_name: typing_extensions.Literal["result", b"result"]
+        ) -> None: ...
+
+    QUERY_ID_FIELD_NUMBER: builtins.int
+    STATUS_FIELD_NUMBER: builtins.int
+    RECENT_PROGRESS_FIELD_NUMBER: builtins.int
+    EXPLAIN_FIELD_NUMBER: builtins.int
+    @property
+    def query_id(self) -> global___StreamingQueryInstanceId:
+        """(Required) Query instance id. See `StreamingQueryInstanceId`."""
+    @property
+    def status(self) -> global___StreamingQueryCommandResult.StatusResult: ...
+    @property
+    def recent_progress(self) -> global___StreamingQueryCommandResult.RecentProgressResult: ...
+    @property
+    def explain(self) -> global___StreamingQueryCommandResult.ExplainResult: ...
+    def __init__(
+        self,
+        *,
+        query_id: global___StreamingQueryInstanceId | None = ...,
+        status: global___StreamingQueryCommandResult.StatusResult | None = ...,
+        recent_progress: global___StreamingQueryCommandResult.RecentProgressResult | None = ...,
+        explain: global___StreamingQueryCommandResult.ExplainResult | None = ...,
+    ) -> None: ...
+    def HasField(
+        self,
+        field_name: typing_extensions.Literal[
+            "explain",
+            b"explain",
+            "query_id",
+            b"query_id",
+            "recent_progress",
+            b"recent_progress",
+            "result_type",
+            b"result_type",
+            "status",
+            b"status",
+        ],
+    ) -> builtins.bool: ...
+    def ClearField(
+        self,
+        field_name: typing_extensions.Literal[
+            "explain",
+            b"explain",
+            "query_id",
+            b"query_id",
+            "recent_progress",
+            b"recent_progress",
+            "result_type",
+            b"result_type",
+            "status",
+            b"status",
+        ],
+    ) -> None: ...
+    def WhichOneof(
+        self, oneof_group: typing_extensions.Literal["result_type", b"result_type"]
+    ) -> typing_extensions.Literal["status", "recent_progress", "explain"] | None: ...
+
+global___StreamingQueryCommandResult = StreamingQueryCommandResult
+
+class GetResourcesCommand(google.protobuf.message.Message):
+    """Command to get the output of 'SparkContext.resources'"""
+
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    def __init__(
+        self,
+    ) -> None: ...
+
+global___GetResourcesCommand = GetResourcesCommand
+
+class GetResourcesCommandResult(google.protobuf.message.Message):
+    """Response for command 'GetResourcesCommand'."""
+
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    class ResourcesEntry(google.protobuf.message.Message):
+        DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+        KEY_FIELD_NUMBER: builtins.int
+        VALUE_FIELD_NUMBER: builtins.int
+        key: builtins.str
+        @property
+        def value(self) -> pyspark.sql.connect.proto.common_pb2.ResourceInformation: ...
+        def __init__(
+            self,
+            *,
+            key: builtins.str = ...,
+            value: pyspark.sql.connect.proto.common_pb2.ResourceInformation | None = ...,
+        ) -> None: ...
+        def HasField(
+            self, field_name: typing_extensions.Literal["value", b"value"]
+        ) -> builtins.bool: ...
+        def ClearField(
+            self, field_name: typing_extensions.Literal["key", b"key", "value", b"value"]
+        ) -> None: ...
+
+    RESOURCES_FIELD_NUMBER: builtins.int
+    @property
+    def resources(
+        self,
+    ) -> google.protobuf.internal.containers.MessageMap[
+        builtins.str, pyspark.sql.connect.proto.common_pb2.ResourceInformation
+    ]: ...
+    def __init__(
+        self,
+        *,
+        resources: collections.abc.Mapping[
+            builtins.str, pyspark.sql.connect.proto.common_pb2.ResourceInformation
+        ]
+        | None = ...,
+    ) -> None: ...
+    def ClearField(
+        self, field_name: typing_extensions.Literal["resources", b"resources"]
+    ) -> None: ...
+
+global___GetResourcesCommandResult = GetResourcesCommandResult

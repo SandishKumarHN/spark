@@ -23,10 +23,14 @@ from pyspark.sql import functions as F
 from pyspark.testing.pandasutils import PandasOnSparkTestCase
 
 
-class SparkFunctionsTests(PandasOnSparkTestCase):
+class SparkFunctionsTestsMixin:
     def test_repeat(self):
         # TODO: Placeholder
         pass
+
+
+class SparkFunctionsTests(SparkFunctionsTestsMixin, PandasOnSparkTestCase):
+    pass
 
 
 if __name__ == "__main__":
@@ -34,7 +38,7 @@ if __name__ == "__main__":
     from pyspark.pandas.tests.test_spark_functions import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

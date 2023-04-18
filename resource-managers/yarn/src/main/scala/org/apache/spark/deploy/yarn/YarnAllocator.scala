@@ -35,6 +35,7 @@ import org.apache.hadoop.yarn.client.api.AMRMClient.ContainerRequest
 import org.apache.hadoop.yarn.conf.YarnConfiguration
 
 import org.apache.spark.{SecurityManager, SparkConf, SparkException}
+import org.apache.spark.deploy.ExecutorFailureTracker
 import org.apache.spark.deploy.yarn.ResourceRequestHelper._
 import org.apache.spark.deploy.yarn.YarnSparkHadoopUtil._
 import org.apache.spark.deploy.yarn.config._
@@ -158,7 +159,7 @@ private[yarn] class YarnAllocator(
   private var executorIdCounter: Int =
     driverRef.askSync[Int](RetrieveLastAllocatedExecutorId)
 
-  private[spark] val failureTracker = new FailureTracker(sparkConf, clock)
+  private[spark] val failureTracker = new ExecutorFailureTracker(sparkConf, clock)
 
   private val allocatorNodeHealthTracker =
     new YarnAllocatorNodeHealthTracker(sparkConf, amClient, failureTracker)
@@ -199,9 +200,11 @@ private[yarn] class YarnAllocator(
     }
   }
 
+  @volatile private var shutdown = false
+
   // The default profile is always present so we need to initialize the datastructures keyed by
   // ResourceProfile id to ensure its present if things start running before a request for
-  // executors could add it. This approach is easier then going and special casing everywhere.
+  // executors could add it. This approach is easier than going and special casing everywhere.
   private def initDefaultProfile(): Unit = synchronized {
     allocatedHostToContainersMapPerRPId(DEFAULT_RESOURCE_PROFILE_ID) =
       new HashMap[String, mutable.Set[ContainerId]]()
@@ -214,6 +217,8 @@ private[yarn] class YarnAllocator(
   }
 
   initDefaultProfile()
+
+  def setShutdown(shutdown: Boolean): Unit = this.shutdown = shutdown
 
   def getNumExecutorsRunning: Int = synchronized {
     runningExecutorsPerResourceProfileId.values.map(_.size).sum
@@ -298,7 +303,7 @@ private[yarn] class YarnAllocator(
 
   // if a ResourceProfile hasn't been seen yet, create the corresponding YARN Resource for it
   private def createYarnResourceForResourceProfile(rp: ResourceProfile): Unit = synchronized {
-    if (!rpIdToYarnResource.contains(rp.id)) {
+    if (!rpIdToYarnResource.containsKey(rp.id)) {
       // track the resource profile if not already there
       getOrUpdateRunningExecutorForRPId(rp.id)
       logInfo(s"Resource profile ${rp.id} doesn't exist, adding it")
@@ -701,7 +706,7 @@ private[yarn] class YarnAllocator(
       containersToUse: ArrayBuffer[Container],
       remaining: ArrayBuffer[Container]): Unit = {
     // Match on the exact resource we requested so there shouldn't be a mismatch,
-    // we are relying on YARN to return a container with resources no less then we requested.
+    // we are relying on YARN to return a container with resources no less than we requested.
     // If we change this, or starting validating the container, be sure the logic covers SPARK-6050.
     val rpId = getResourceProfileIdFromPriority(allocatedContainer.getPriority)
     val resourceForRP = rpIdToYarnResource.get(rpId)
@@ -835,6 +840,8 @@ private[yarn] class YarnAllocator(
         // now I think its ok as none of the containers are expected to exit.
         val exitStatus = completedContainer.getExitStatus
         val (exitCausedByApp, containerExitReason) = exitStatus match {
+          case _ if shutdown =>
+            (false, s"Executor for container $containerId exited after Application shutdown.")
           case ContainerExitStatus.SUCCESS =>
             (false, s"Executor for container $containerId exited because of a YARN event (e.g., " +
               "preemption) and not because of an error in the running job.")

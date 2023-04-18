@@ -24,7 +24,7 @@ import pyspark.pandas as ps
 from pyspark.testing.pandasutils import PandasOnSparkTestCase, TestUtils
 
 
-class CategoricalIndexTest(PandasOnSparkTestCase, TestUtils):
+class CategoricalIndexTestsMixin:
     def test_categorical_index(self):
         pidx = pd.CategoricalIndex([1, 2, 3])
         psidx = ps.CategoricalIndex([1, 2, 3])
@@ -454,12 +454,16 @@ class CategoricalIndexTest(PandasOnSparkTestCase, TestUtils):
             )
 
 
+class CategoricalIndexTests(CategoricalIndexTestsMixin, PandasOnSparkTestCase, TestUtils):
+    pass
+
+
 if __name__ == "__main__":
     import unittest
     from pyspark.pandas.tests.indexes.test_category import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

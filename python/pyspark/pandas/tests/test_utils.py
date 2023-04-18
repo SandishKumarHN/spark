@@ -31,7 +31,7 @@ from pyspark.testing.sqlutils import SQLTestUtils
 some_global_variable = 0
 
 
-class UtilsTest(PandasOnSparkTestCase, SQLTestUtils):
+class UtilsTestsMixin:
 
     # a dummy to_html version with an extra parameter that pandas does not support
     # used in test_validate_arguments_and_invoke_function
@@ -116,12 +116,16 @@ class TestClassForLazyProp:
         return self.some_variable
 
 
+class UtilsTests(UtilsTestsMixin, PandasOnSparkTestCase, SQLTestUtils):
+    pass
+
+
 if __name__ == "__main__":
     import unittest
     from pyspark.pandas.tests.test_utils import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

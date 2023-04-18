@@ -34,7 +34,7 @@ from pyspark.pandas.typedef.typehints import (
 from pyspark.sql.types import DecimalType, IntegralType
 
 
-class NumOpsTest(OpsTestBase):
+class NumOpsTestsMixin:
     """Unit tests for arithmetic operations of numeric data types.
 
     A few test cases are disabled because pandas-on-Spark returns float64 whereas pandas
@@ -690,11 +690,15 @@ class FractionalExtensionOpsTest(OpsTestBase):
                 self.check_extension(pser >= pser, (psser >= psser).sort_index())
 
 
+class NumOpsTests(NumOpsTestsMixin, OpsTestBase):
+    pass
+
+
 if __name__ == "__main__":
     from pyspark.pandas.tests.data_type_ops.test_num_ops import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

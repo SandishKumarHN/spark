@@ -27,7 +27,7 @@ from pyspark.pandas.exceptions import SparkPandasIndexingError
 from pyspark.testing.pandasutils import ComparisonTestBase, compare_both
 
 
-class BasicIndexingTest(ComparisonTestBase):
+class BasicIndexingTestsMixin:
     @property
     def pdf(self):
         return pd.DataFrame(
@@ -1323,11 +1323,15 @@ class IndexingTest(ComparisonTestBase):
             psdf.iloc[[1, 1]]
 
 
+class BasicIndexingTests(BasicIndexingTestsMixin, ComparisonTestBase):
+    pass
+
+
 if __name__ == "__main__":
     from pyspark.pandas.tests.test_indexing import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

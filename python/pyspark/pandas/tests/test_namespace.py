@@ -31,7 +31,7 @@ from pyspark.testing.pandasutils import PandasOnSparkTestCase
 from pyspark.testing.sqlutils import SQLTestUtils
 
 
-class NamespaceTest(PandasOnSparkTestCase, SQLTestUtils):
+class NamespaceTestsMixin:
     def test_from_pandas(self):
         pdf = pd.DataFrame({"year": [2015, 2016], "month": [2, 3], "day": [4, 5]})
         psdf = ps.from_pandas(pdf)
@@ -616,12 +616,16 @@ class NamespaceTest(PandasOnSparkTestCase, SQLTestUtils):
                 getattr(ps, name)()
 
 
+class NamespaceTests(NamespaceTestsMixin, PandasOnSparkTestCase, SQLTestUtils):
+    pass
+
+
 if __name__ == "__main__":
     import unittest
     from pyspark.pandas.tests.test_namespace import *  # noqa: F401
 
     try:
-        import xmlrunner  # type: ignore[import]
+        import xmlrunner
 
         testRunner = xmlrunner.XMLTestRunner(output="target/test-reports", verbosity=2)
     except ImportError:

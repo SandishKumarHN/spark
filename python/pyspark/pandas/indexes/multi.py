@@ -26,7 +26,7 @@ from pyspark.sql.types import DataType
 
 # For running doctests and reference resolution in PyCharm.
 from pyspark import pandas as ps
-from pyspark.pandas._typing import Label, Name, Scalar
+from pyspark.pandas._typing import Label, Name, Scalar, GenericColumn
 from pyspark.pandas.exceptions import PandasNotImplementedError
 from pyspark.pandas.frame import DataFrame
 from pyspark.pandas.indexes.base import Index
@@ -136,7 +136,7 @@ class MultiIndex(Index):
         raise TypeError("TypeError: cannot perform __abs__ with this index type: MultiIndex")
 
     def _with_new_scol(
-        self, scol: Column, *, field: Optional[InternalField] = None
+        self, scol: GenericColumn, *, field: Optional[InternalField] = None
     ) -> "MultiIndex":
         raise NotImplementedError("Not supported for type MultiIndex")
 
@@ -290,7 +290,7 @@ class MultiIndex(Index):
             DataFrame to be converted to MultiIndex.
         names : list-like, optional
             If no names are provided, use the column names, or tuple of column
-            names if the columns is a MultiIndex. If a sequence, overwrite
+            names if the column is a MultiIndex. If a sequence, overwrite
             names with the given sequence.
 
         Returns
@@ -411,10 +411,10 @@ class MultiIndex(Index):
         ----------
         i : int, str, default -2
             First level of index to be swapped. Can pass level name as string.
-            Type of parameters can be mixed.
+            Parameter types can be mixed.
         j : int, str, default -1
             Second level of index to be swapped. Can pass level name as string.
-            Type of parameters can be mixed.
+            Parameter types can be mixed.
 
         Returns
         -------
@@ -498,7 +498,7 @@ class MultiIndex(Index):
     def _comparator_for_monotonic_increasing(
         data_type: DataType,
     ) -> Callable[[Column, Column, Callable[[Column, Column], Column]], Column]:
-        return compare_disallow_null
+        return compare_disallow_null  # type: ignore[return-value]
 
     def _is_monotonic(self, order: str) -> bool:
         if order == "increasing":
@@ -516,7 +516,7 @@ class MultiIndex(Index):
             prev = F.lag(scol, 1).over(window)
             compare = MultiIndex._comparator_for_monotonic_increasing(data_type)
             # Since pandas 1.1.4, null value is not allowed at any levels of MultiIndex.
-            # Therefore, we should check `has_not_null` over the all levels.
+            # Therefore, we should check `has_not_null` over all levels.
             has_not_null = has_not_null & scol.isNotNull()
             cond = F.when(scol.eqNullSafe(prev), cond).otherwise(compare(scol, prev, Column.__gt__))
 
@@ -546,7 +546,7 @@ class MultiIndex(Index):
     def _comparator_for_monotonic_decreasing(
         data_type: DataType,
     ) -> Callable[[Column, Column, Callable[[Column, Column], Column]], Column]:
-        return compare_disallow_null
+        return compare_disallow_null  # type: ignore[return-value]
 
     def _is_monotonic_decreasing(self) -> Series:
         window = Window.orderBy(NATURAL_ORDER_COLUMN_NAME).rowsBetween(-1, -1)
@@ -558,7 +558,7 @@ class MultiIndex(Index):
             prev = F.lag(scol, 1).over(window)
             compare = MultiIndex._comparator_for_monotonic_increasing(data_type)
             # Since pandas 1.1.4, null value is not allowed at any levels of MultiIndex.
-            # Therefore, we should check `has_not_null` over the all levels.
+            # Therefore, we should check `has_not_null` over all levels.
             has_not_null = has_not_null & scol.isNotNull()
             cond = F.when(scol.eqNullSafe(prev), cond).otherwise(compare(scol, prev, Column.__lt__))
 
@@ -680,7 +680,7 @@ class MultiIndex(Index):
         """
         # TODO: We might need to handle internal state change.
         # So far, we don't have any functions to change the internal state of MultiIndex except for
-        # series-like operations. In that case, it creates new Index object instead of MultiIndex.
+        # series-like operations. In that case, it creates a new Index object instead of MultiIndex.
         return cast(pd.MultiIndex, super().to_pandas())
 
     def _to_pandas(self) -> pd.MultiIndex:
@@ -745,7 +745,7 @@ class MultiIndex(Index):
 
         Returns
         -------
-        symmetric_difference : MiltiIndex
+        symmetric_difference : MultiIndex
 
         Notes
         -----
@@ -774,7 +774,7 @@ class MultiIndex(Index):
                     (  'lama', 'speed')],
                    )
 
-        You can set names of result Index.
+        You can set names of the result Index.
 
         >>> s1.index.symmetric_difference(s2.index, result_name=['a', 'b'])  # doctest: +SKIP
         MultiIndex([('pandas-on-Spark', 'speed'),
