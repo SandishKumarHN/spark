@@ -10,33 +10,33 @@ struct<>
 -- !query
 SELECT '1' + cast(1 as tinyint)                         FROM t
 -- !query schema
-struct<(1 + CAST(1 AS TINYINT)):double>
+struct<(1 + CAST(1 AS TINYINT)):bigint>
 -- !query output
-2.0
+2
 
 
 -- !query
 SELECT '1' + cast(1 as smallint)                        FROM t
 -- !query schema
-struct<(1 + CAST(1 AS SMALLINT)):double>
+struct<(1 + CAST(1 AS SMALLINT)):bigint>
 -- !query output
-2.0
+2
 
 
 -- !query
 SELECT '1' + cast(1 as int)                             FROM t
 -- !query schema
-struct<(1 + CAST(1 AS INT)):double>
+struct<(1 + CAST(1 AS INT)):bigint>
 -- !query output
-2.0
+2
 
 
 -- !query
 SELECT '1' + cast(1 as bigint)                          FROM t
 -- !query schema
-struct<(1 + CAST(1 AS BIGINT)):double>
+struct<(1 + CAST(1 AS BIGINT)):bigint>
 -- !query output
-2.0
+2
 
 
 -- !query
@@ -66,9 +66,25 @@ struct<(1 + CAST(1 AS DECIMAL(10,0))):double>
 -- !query
 SELECT '1' + '1'                                        FROM t
 -- !query schema
-struct<(1 + 1):double>
+struct<>
 -- !query output
-2.0
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
+{
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
+  "sqlState" : "42K09",
+  "messageParameters" : {
+    "actualDataType" : "\"STRING\"",
+    "inputType" : "(\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\")",
+    "sqlExpr" : "\"(1 + 1)\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 16,
+    "fragment" : "'1' + '1'"
+  } ]
+}
 
 
 -- !query
@@ -76,13 +92,13 @@ SELECT '1' + cast('1' as binary)                        FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"BINARY\"",
+    "actualDataType" : "\"BINARY\"",
+    "inputType" : "(\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\")",
     "sqlExpr" : "\"(1 + CAST(1 AS BINARY))\""
   },
   "queryContext" : [ {
@@ -100,13 +116,13 @@ SELECT '1' + cast(1 as boolean)                         FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"BOOLEAN\"",
+    "actualDataType" : "\"BOOLEAN\"",
+    "inputType" : "(\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\")",
     "sqlExpr" : "\"(1 + CAST(1 AS BOOLEAN))\""
   },
   "queryContext" : [ {
@@ -124,13 +140,13 @@ SELECT '1' + cast('2017-12-11 09:30:00.0' as timestamp) FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"TIMESTAMP\"",
+    "actualDataType" : "\"TIMESTAMP\"",
+    "inputType" : "(\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\")",
     "sqlExpr" : "\"(1 + CAST(2017-12-11 09:30:00.0 AS TIMESTAMP))\""
   },
   "queryContext" : [ {
@@ -148,16 +164,16 @@ SELECT '1' + cast('2017-12-11 09:30:00' as date)        FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "inputSql" : "\"1\"",
-    "inputType" : "\"DOUBLE\"",
-    "paramIndex" : "2",
+    "inputSql" : "\"CAST(2017-12-11 09:30:00 AS DATE)\"",
+    "inputType" : "\"DATE\"",
+    "paramIndex" : "second",
     "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
-    "sqlExpr" : "\"date_add(CAST(2017-12-11 09:30:00 AS DATE), 1)\""
+    "sqlExpr" : "\"date_add(1, CAST(2017-12-11 09:30:00 AS DATE))\""
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -172,33 +188,33 @@ org.apache.spark.sql.AnalysisException
 -- !query
 SELECT '1' - cast(1 as tinyint)                         FROM t
 -- !query schema
-struct<(1 - CAST(1 AS TINYINT)):double>
+struct<(1 - CAST(1 AS TINYINT)):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT '1' - cast(1 as smallint)                        FROM t
 -- !query schema
-struct<(1 - CAST(1 AS SMALLINT)):double>
+struct<(1 - CAST(1 AS SMALLINT)):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT '1' - cast(1 as int)                             FROM t
 -- !query schema
-struct<(1 - CAST(1 AS INT)):double>
+struct<(1 - CAST(1 AS INT)):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT '1' - cast(1 as bigint)                          FROM t
 -- !query schema
-struct<(1 - CAST(1 AS BIGINT)):double>
+struct<(1 - CAST(1 AS BIGINT)):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
@@ -228,9 +244,25 @@ struct<(1 - CAST(1 AS DECIMAL(10,0))):double>
 -- !query
 SELECT '1' - '1'                                        FROM t
 -- !query schema
-struct<(1 - 1):double>
+struct<>
 -- !query output
-0.0
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
+{
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
+  "sqlState" : "42K09",
+  "messageParameters" : {
+    "actualDataType" : "\"STRING\"",
+    "inputType" : "(\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\")",
+    "sqlExpr" : "\"(1 - 1)\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 16,
+    "fragment" : "'1' - '1'"
+  } ]
+}
 
 
 -- !query
@@ -238,13 +270,13 @@ SELECT '1' - cast('1' as binary)                        FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"BINARY\"",
+    "actualDataType" : "\"BINARY\"",
+    "inputType" : "(\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\")",
     "sqlExpr" : "\"(1 - CAST(1 AS BINARY))\""
   },
   "queryContext" : [ {
@@ -262,13 +294,13 @@ SELECT '1' - cast(1 as boolean)                         FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"BOOLEAN\"",
+    "actualDataType" : "\"BOOLEAN\"",
+    "inputType" : "(\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\")",
     "sqlExpr" : "\"(1 - CAST(1 AS BOOLEAN))\""
   },
   "queryContext" : [ {
@@ -286,16 +318,14 @@ SELECT '1' - cast('2017-12-11 09:30:00.0' as timestamp) FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.SparkDateTimeException
 {
-  "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
-  "sqlState" : "42K09",
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
   "messageParameters" : {
-    "inputSql" : "\"1\"",
-    "inputType" : "\"STRING\"",
-    "paramIndex" : "1",
-    "requiredType" : "\"(TIMESTAMP OR TIMESTAMP WITHOUT TIME ZONE)\"",
-    "sqlExpr" : "\"(1 - CAST(2017-12-11 09:30:00.0 AS TIMESTAMP))\""
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -310,41 +340,57 @@ org.apache.spark.sql.AnalysisException
 -- !query
 SELECT '1' - cast('2017-12-11 09:30:00' as date)        FROM t
 -- !query schema
-struct<(1 - CAST(2017-12-11 09:30:00 AS DATE)):interval day>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 48,
+    "fragment" : "'1' - cast('2017-12-11 09:30:00' as date)"
+  } ]
+}
 
 
 -- !query
 SELECT '1' * cast(1 as tinyint)                         FROM t
 -- !query schema
-struct<(1 * CAST(1 AS TINYINT)):double>
+struct<(1 * CAST(1 AS TINYINT)):bigint>
 -- !query output
-1.0
+1
 
 
 -- !query
 SELECT '1' * cast(1 as smallint)                        FROM t
 -- !query schema
-struct<(1 * CAST(1 AS SMALLINT)):double>
+struct<(1 * CAST(1 AS SMALLINT)):bigint>
 -- !query output
-1.0
+1
 
 
 -- !query
 SELECT '1' * cast(1 as int)                             FROM t
 -- !query schema
-struct<(1 * CAST(1 AS INT)):double>
+struct<(1 * CAST(1 AS INT)):bigint>
 -- !query output
-1.0
+1
 
 
 -- !query
 SELECT '1' * cast(1 as bigint)                          FROM t
 -- !query schema
-struct<(1 * CAST(1 AS BIGINT)):double>
+struct<(1 * CAST(1 AS BIGINT)):bigint>
 -- !query output
-1.0
+1
 
 
 -- !query
@@ -374,9 +420,25 @@ struct<(1 * CAST(1 AS DECIMAL(10,0))):double>
 -- !query
 SELECT '1' * '1'                                        FROM t
 -- !query schema
-struct<(1 * 1):double>
+struct<>
 -- !query output
-1.0
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
+{
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
+  "sqlState" : "42K09",
+  "messageParameters" : {
+    "actualDataType" : "\"STRING\"",
+    "inputType" : "\"NUMERIC\"",
+    "sqlExpr" : "\"(1 * 1)\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 16,
+    "fragment" : "'1' * '1'"
+  } ]
+}
 
 
 -- !query
@@ -384,13 +446,13 @@ SELECT '1' * cast('1' as binary)                        FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"BINARY\"",
+    "actualDataType" : "\"BINARY\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(1 * CAST(1 AS BINARY))\""
   },
   "queryContext" : [ {
@@ -408,13 +470,13 @@ SELECT '1' * cast(1 as boolean)                         FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"BOOLEAN\"",
+    "actualDataType" : "\"BOOLEAN\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(1 * CAST(1 AS BOOLEAN))\""
   },
   "queryContext" : [ {
@@ -432,13 +494,13 @@ SELECT '1' * cast('2017-12-11 09:30:00.0' as timestamp) FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"TIMESTAMP\"",
+    "actualDataType" : "\"TIMESTAMP\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(1 * CAST(2017-12-11 09:30:00.0 AS TIMESTAMP))\""
   },
   "queryContext" : [ {
@@ -456,13 +518,13 @@ SELECT '1' * cast('2017-12-11 09:30:00' as date)        FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"DATE\"",
+    "actualDataType" : "\"DATE\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(1 * CAST(2017-12-11 09:30:00 AS DATE))\""
   },
   "queryContext" : [ {
@@ -534,9 +596,25 @@ struct<(1 / CAST(1 AS DECIMAL(10,0))):double>
 -- !query
 SELECT '1' / '1'                                        FROM t
 -- !query schema
-struct<(1 / 1):double>
+struct<>
 -- !query output
-1.0
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
+{
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
+  "sqlState" : "42K09",
+  "messageParameters" : {
+    "actualDataType" : "\"STRING\"",
+    "inputType" : "(\"DOUBLE\" or \"DECIMAL\")",
+    "sqlExpr" : "\"(1 / 1)\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 16,
+    "fragment" : "'1' / '1'"
+  } ]
+}
 
 
 -- !query
@@ -544,13 +622,13 @@ SELECT '1' / cast('1' as binary)                        FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"BINARY\"",
+    "actualDataType" : "\"BINARY\"",
+    "inputType" : "(\"DOUBLE\" or \"DECIMAL\")",
     "sqlExpr" : "\"(1 / CAST(1 AS BINARY))\""
   },
   "queryContext" : [ {
@@ -568,13 +646,13 @@ SELECT '1' / cast(1 as boolean)                         FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"BOOLEAN\"",
+    "actualDataType" : "\"BOOLEAN\"",
+    "inputType" : "(\"DOUBLE\" or \"DECIMAL\")",
     "sqlExpr" : "\"(1 / CAST(1 AS BOOLEAN))\""
   },
   "queryContext" : [ {
@@ -592,13 +670,13 @@ SELECT '1' / cast('2017-12-11 09:30:00.0' as timestamp) FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"TIMESTAMP\"",
+    "actualDataType" : "\"TIMESTAMP\"",
+    "inputType" : "(\"DOUBLE\" or \"DECIMAL\")",
     "sqlExpr" : "\"(1 / CAST(2017-12-11 09:30:00.0 AS TIMESTAMP))\""
   },
   "queryContext" : [ {
@@ -616,13 +694,13 @@ SELECT '1' / cast('2017-12-11 09:30:00' as date)        FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"DATE\"",
+    "actualDataType" : "\"DATE\"",
+    "inputType" : "(\"DOUBLE\" or \"DECIMAL\")",
     "sqlExpr" : "\"(1 / CAST(2017-12-11 09:30:00 AS DATE))\""
   },
   "queryContext" : [ {
@@ -638,33 +716,33 @@ org.apache.spark.sql.AnalysisException
 -- !query
 SELECT '1' % cast(1 as tinyint)                         FROM t
 -- !query schema
-struct<(1 % CAST(1 AS TINYINT)):double>
+struct<(1 % CAST(1 AS TINYINT)):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT '1' % cast(1 as smallint)                        FROM t
 -- !query schema
-struct<(1 % CAST(1 AS SMALLINT)):double>
+struct<(1 % CAST(1 AS SMALLINT)):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT '1' % cast(1 as int)                             FROM t
 -- !query schema
-struct<(1 % CAST(1 AS INT)):double>
+struct<(1 % CAST(1 AS INT)):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT '1' % cast(1 as bigint)                          FROM t
 -- !query schema
-struct<(1 % CAST(1 AS BIGINT)):double>
+struct<(1 % CAST(1 AS BIGINT)):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
@@ -694,9 +772,25 @@ struct<(1 % CAST(1 AS DECIMAL(10,0))):double>
 -- !query
 SELECT '1' % '1'                                        FROM t
 -- !query schema
-struct<(1 % 1):double>
+struct<>
 -- !query output
-0.0
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
+{
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
+  "sqlState" : "42K09",
+  "messageParameters" : {
+    "actualDataType" : "\"STRING\"",
+    "inputType" : "\"NUMERIC\"",
+    "sqlExpr" : "\"(1 % 1)\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 16,
+    "fragment" : "'1' % '1'"
+  } ]
+}
 
 
 -- !query
@@ -704,13 +798,13 @@ SELECT '1' % cast('1' as binary)                        FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"BINARY\"",
+    "actualDataType" : "\"BINARY\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(1 % CAST(1 AS BINARY))\""
   },
   "queryContext" : [ {
@@ -728,13 +822,13 @@ SELECT '1' % cast(1 as boolean)                         FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"BOOLEAN\"",
+    "actualDataType" : "\"BOOLEAN\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(1 % CAST(1 AS BOOLEAN))\""
   },
   "queryContext" : [ {
@@ -752,13 +846,13 @@ SELECT '1' % cast('2017-12-11 09:30:00.0' as timestamp) FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"TIMESTAMP\"",
+    "actualDataType" : "\"TIMESTAMP\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(1 % CAST(2017-12-11 09:30:00.0 AS TIMESTAMP))\""
   },
   "queryContext" : [ {
@@ -776,13 +870,13 @@ SELECT '1' % cast('2017-12-11 09:30:00' as date)        FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"DATE\"",
+    "actualDataType" : "\"DATE\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(1 % CAST(2017-12-11 09:30:00 AS DATE))\""
   },
   "queryContext" : [ {
@@ -798,33 +892,33 @@ org.apache.spark.sql.AnalysisException
 -- !query
 SELECT pmod('1', cast(1 as tinyint))                         FROM t
 -- !query schema
-struct<pmod(1, CAST(1 AS TINYINT)):double>
+struct<pmod(1, CAST(1 AS TINYINT)):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT pmod('1', cast(1 as smallint))                        FROM t
 -- !query schema
-struct<pmod(1, CAST(1 AS SMALLINT)):double>
+struct<pmod(1, CAST(1 AS SMALLINT)):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT pmod('1', cast(1 as int))                             FROM t
 -- !query schema
-struct<pmod(1, CAST(1 AS INT)):double>
+struct<pmod(1, CAST(1 AS INT)):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT pmod('1', cast(1 as bigint))                          FROM t
 -- !query schema
-struct<pmod(1, CAST(1 AS BIGINT)):double>
+struct<pmod(1, CAST(1 AS BIGINT)):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
@@ -854,9 +948,25 @@ struct<pmod(1, CAST(1 AS DECIMAL(10,0))):double>
 -- !query
 SELECT pmod('1', '1')                                        FROM t
 -- !query schema
-struct<pmod(1, 1):double>
+struct<>
 -- !query output
-0.0
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
+{
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
+  "sqlState" : "42K09",
+  "messageParameters" : {
+    "actualDataType" : "\"STRING\"",
+    "inputType" : "\"NUMERIC\"",
+    "sqlExpr" : "\"pmod(1, 1)\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 21,
+    "fragment" : "pmod('1', '1')"
+  } ]
+}
 
 
 -- !query
@@ -864,13 +974,13 @@ SELECT pmod('1', cast('1' as binary))                        FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"BINARY\"",
+    "actualDataType" : "\"BINARY\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"pmod(1, CAST(1 AS BINARY))\""
   },
   "queryContext" : [ {
@@ -888,13 +998,13 @@ SELECT pmod('1', cast(1 as boolean))                         FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"BOOLEAN\"",
+    "actualDataType" : "\"BOOLEAN\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"pmod(1, CAST(1 AS BOOLEAN))\""
   },
   "queryContext" : [ {
@@ -912,13 +1022,13 @@ SELECT pmod('1', cast('2017-12-11 09:30:00.0' as timestamp)) FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"TIMESTAMP\"",
+    "actualDataType" : "\"TIMESTAMP\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"pmod(1, CAST(2017-12-11 09:30:00.0 AS TIMESTAMP))\""
   },
   "queryContext" : [ {
@@ -936,13 +1046,13 @@ SELECT pmod('1', cast('2017-12-11 09:30:00' as date))        FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"DATE\"",
+    "actualDataType" : "\"DATE\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"pmod(1, CAST(2017-12-11 09:30:00 AS DATE))\""
   },
   "queryContext" : [ {
@@ -958,33 +1068,33 @@ org.apache.spark.sql.AnalysisException
 -- !query
 SELECT cast(1 as tinyint)                         + '1' FROM t
 -- !query schema
-struct<(CAST(1 AS TINYINT) + 1):double>
+struct<(CAST(1 AS TINYINT) + 1):bigint>
 -- !query output
-2.0
+2
 
 
 -- !query
 SELECT cast(1 as smallint)                        + '1' FROM t
 -- !query schema
-struct<(CAST(1 AS SMALLINT) + 1):double>
+struct<(CAST(1 AS SMALLINT) + 1):bigint>
 -- !query output
-2.0
+2
 
 
 -- !query
 SELECT cast(1 as int)                             + '1' FROM t
 -- !query schema
-struct<(CAST(1 AS INT) + 1):double>
+struct<(CAST(1 AS INT) + 1):bigint>
 -- !query output
-2.0
+2
 
 
 -- !query
 SELECT cast(1 as bigint)                          + '1' FROM t
 -- !query schema
-struct<(CAST(1 AS BIGINT) + 1):double>
+struct<(CAST(1 AS BIGINT) + 1):bigint>
 -- !query output
-2.0
+2
 
 
 -- !query
@@ -1016,13 +1126,13 @@ SELECT cast('1' as binary)                        + '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"BINARY\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"BINARY\"",
+    "inputType" : "(\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\")",
     "sqlExpr" : "\"(CAST(1 AS BINARY) + 1)\""
   },
   "queryContext" : [ {
@@ -1040,13 +1150,13 @@ SELECT cast(1 as boolean)                         + '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"BOOLEAN\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"BOOLEAN\"",
+    "inputType" : "(\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\")",
     "sqlExpr" : "\"(CAST(1 AS BOOLEAN) + 1)\""
   },
   "queryContext" : [ {
@@ -1064,13 +1174,13 @@ SELECT cast('2017-12-11 09:30:00.0' as timestamp) + '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"TIMESTAMP\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"TIMESTAMP\"",
+    "inputType" : "(\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\")",
     "sqlExpr" : "\"(CAST(2017-12-11 09:30:00.0 AS TIMESTAMP) + 1)\""
   },
   "queryContext" : [ {
@@ -1088,14 +1198,14 @@ SELECT cast('2017-12-11 09:30:00' as date)        + '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
     "inputSql" : "\"1\"",
-    "inputType" : "\"DOUBLE\"",
-    "paramIndex" : "2",
+    "inputType" : "\"DATE\"",
+    "paramIndex" : "second",
     "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
     "sqlExpr" : "\"date_add(CAST(2017-12-11 09:30:00 AS DATE), 1)\""
   },
@@ -1112,33 +1222,33 @@ org.apache.spark.sql.AnalysisException
 -- !query
 SELECT cast(1 as tinyint)                         - '1' FROM t
 -- !query schema
-struct<(CAST(1 AS TINYINT) - 1):double>
+struct<(CAST(1 AS TINYINT) - 1):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT cast(1 as smallint)                        - '1' FROM t
 -- !query schema
-struct<(CAST(1 AS SMALLINT) - 1):double>
+struct<(CAST(1 AS SMALLINT) - 1):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT cast(1 as int)                             - '1' FROM t
 -- !query schema
-struct<(CAST(1 AS INT) - 1):double>
+struct<(CAST(1 AS INT) - 1):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT cast(1 as bigint)                          - '1' FROM t
 -- !query schema
-struct<(CAST(1 AS BIGINT) - 1):double>
+struct<(CAST(1 AS BIGINT) - 1):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
@@ -1170,13 +1280,13 @@ SELECT cast('1' as binary)                        - '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"BINARY\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"BINARY\"",
+    "inputType" : "(\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\")",
     "sqlExpr" : "\"(CAST(1 AS BINARY) - 1)\""
   },
   "queryContext" : [ {
@@ -1194,13 +1304,13 @@ SELECT cast(1 as boolean)                         - '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"BOOLEAN\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"BOOLEAN\"",
+    "inputType" : "(\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\")",
     "sqlExpr" : "\"(CAST(1 AS BOOLEAN) - 1)\""
   },
   "queryContext" : [ {
@@ -1218,16 +1328,14 @@ SELECT cast('2017-12-11 09:30:00.0' as timestamp) - '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.SparkDateTimeException
 {
-  "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
-  "sqlState" : "42K09",
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
   "messageParameters" : {
-    "inputSql" : "\"1\"",
-    "inputType" : "\"STRING\"",
-    "paramIndex" : "2",
-    "requiredType" : "\"(TIMESTAMP OR TIMESTAMP WITHOUT TIME ZONE)\"",
-    "sqlExpr" : "\"(CAST(2017-12-11 09:30:00.0 AS TIMESTAMP) - 1)\""
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -1244,16 +1352,14 @@ SELECT cast('2017-12-11 09:30:00' as date)        - '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.SparkDateTimeException
 {
-  "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
-  "sqlState" : "42K09",
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
   "messageParameters" : {
-    "inputSql" : "\"1\"",
-    "inputType" : "\"DOUBLE\"",
-    "paramIndex" : "2",
-    "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
-    "sqlExpr" : "\"date_sub(CAST(2017-12-11 09:30:00 AS DATE), 1)\""
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -1268,33 +1374,33 @@ org.apache.spark.sql.AnalysisException
 -- !query
 SELECT cast(1 as tinyint)                         * '1' FROM t
 -- !query schema
-struct<(CAST(1 AS TINYINT) * 1):double>
+struct<(CAST(1 AS TINYINT) * 1):bigint>
 -- !query output
-1.0
+1
 
 
 -- !query
 SELECT cast(1 as smallint)                        * '1' FROM t
 -- !query schema
-struct<(CAST(1 AS SMALLINT) * 1):double>
+struct<(CAST(1 AS SMALLINT) * 1):bigint>
 -- !query output
-1.0
+1
 
 
 -- !query
 SELECT cast(1 as int)                             * '1' FROM t
 -- !query schema
-struct<(CAST(1 AS INT) * 1):double>
+struct<(CAST(1 AS INT) * 1):bigint>
 -- !query output
-1.0
+1
 
 
 -- !query
 SELECT cast(1 as bigint)                          * '1' FROM t
 -- !query schema
-struct<(CAST(1 AS BIGINT) * 1):double>
+struct<(CAST(1 AS BIGINT) * 1):bigint>
 -- !query output
-1.0
+1
 
 
 -- !query
@@ -1326,13 +1432,13 @@ SELECT cast('1' as binary)                        * '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"BINARY\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"BINARY\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(CAST(1 AS BINARY) * 1)\""
   },
   "queryContext" : [ {
@@ -1350,13 +1456,13 @@ SELECT cast(1 as boolean)                         * '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"BOOLEAN\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"BOOLEAN\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(CAST(1 AS BOOLEAN) * 1)\""
   },
   "queryContext" : [ {
@@ -1374,13 +1480,13 @@ SELECT cast('2017-12-11 09:30:00.0' as timestamp) * '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"TIMESTAMP\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"TIMESTAMP\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(CAST(2017-12-11 09:30:00.0 AS TIMESTAMP) * 1)\""
   },
   "queryContext" : [ {
@@ -1398,13 +1504,13 @@ SELECT cast('2017-12-11 09:30:00' as date)        * '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DATE\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"DATE\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(CAST(2017-12-11 09:30:00 AS DATE) * 1)\""
   },
   "queryContext" : [ {
@@ -1478,13 +1584,13 @@ SELECT cast('1' as binary)                        / '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"BINARY\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"BINARY\"",
+    "inputType" : "(\"DOUBLE\" or \"DECIMAL\")",
     "sqlExpr" : "\"(CAST(1 AS BINARY) / 1)\""
   },
   "queryContext" : [ {
@@ -1502,13 +1608,13 @@ SELECT cast(1 as boolean)                         / '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"BOOLEAN\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"BOOLEAN\"",
+    "inputType" : "(\"DOUBLE\" or \"DECIMAL\")",
     "sqlExpr" : "\"(CAST(1 AS BOOLEAN) / 1)\""
   },
   "queryContext" : [ {
@@ -1526,13 +1632,13 @@ SELECT cast('2017-12-11 09:30:00.0' as timestamp) / '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"TIMESTAMP\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"TIMESTAMP\"",
+    "inputType" : "(\"DOUBLE\" or \"DECIMAL\")",
     "sqlExpr" : "\"(CAST(2017-12-11 09:30:00.0 AS TIMESTAMP) / 1)\""
   },
   "queryContext" : [ {
@@ -1550,13 +1656,13 @@ SELECT cast('2017-12-11 09:30:00' as date)        / '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DATE\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"DATE\"",
+    "inputType" : "(\"DOUBLE\" or \"DECIMAL\")",
     "sqlExpr" : "\"(CAST(2017-12-11 09:30:00 AS DATE) / 1)\""
   },
   "queryContext" : [ {
@@ -1572,33 +1678,33 @@ org.apache.spark.sql.AnalysisException
 -- !query
 SELECT cast(1 as tinyint)                         % '1' FROM t
 -- !query schema
-struct<(CAST(1 AS TINYINT) % 1):double>
+struct<(CAST(1 AS TINYINT) % 1):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT cast(1 as smallint)                        % '1' FROM t
 -- !query schema
-struct<(CAST(1 AS SMALLINT) % 1):double>
+struct<(CAST(1 AS SMALLINT) % 1):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT cast(1 as int)                             % '1' FROM t
 -- !query schema
-struct<(CAST(1 AS INT) % 1):double>
+struct<(CAST(1 AS INT) % 1):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT cast(1 as bigint)                          % '1' FROM t
 -- !query schema
-struct<(CAST(1 AS BIGINT) % 1):double>
+struct<(CAST(1 AS BIGINT) % 1):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
@@ -1630,13 +1736,13 @@ SELECT cast('1' as binary)                        % '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"BINARY\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"BINARY\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(CAST(1 AS BINARY) % 1)\""
   },
   "queryContext" : [ {
@@ -1654,13 +1760,13 @@ SELECT cast(1 as boolean)                         % '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"BOOLEAN\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"BOOLEAN\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(CAST(1 AS BOOLEAN) % 1)\""
   },
   "queryContext" : [ {
@@ -1678,13 +1784,13 @@ SELECT cast('2017-12-11 09:30:00.0' as timestamp) % '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"TIMESTAMP\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"TIMESTAMP\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(CAST(2017-12-11 09:30:00.0 AS TIMESTAMP) % 1)\""
   },
   "queryContext" : [ {
@@ -1702,13 +1808,13 @@ SELECT cast('2017-12-11 09:30:00' as date)        % '1' FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DATE\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"DATE\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"(CAST(2017-12-11 09:30:00 AS DATE) % 1)\""
   },
   "queryContext" : [ {
@@ -1724,33 +1830,33 @@ org.apache.spark.sql.AnalysisException
 -- !query
 SELECT pmod(cast(1 as tinyint), '1')                         FROM t
 -- !query schema
-struct<pmod(CAST(1 AS TINYINT), 1):double>
+struct<pmod(CAST(1 AS TINYINT), 1):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT pmod(cast(1 as smallint), '1')                        FROM t
 -- !query schema
-struct<pmod(CAST(1 AS SMALLINT), 1):double>
+struct<pmod(CAST(1 AS SMALLINT), 1):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT pmod(cast(1 as int), '1')                             FROM t
 -- !query schema
-struct<pmod(CAST(1 AS INT), 1):double>
+struct<pmod(CAST(1 AS INT), 1):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
 SELECT pmod(cast(1 as bigint), '1')                          FROM t
 -- !query schema
-struct<pmod(CAST(1 AS BIGINT), 1):double>
+struct<pmod(CAST(1 AS BIGINT), 1):bigint>
 -- !query output
-0.0
+0
 
 
 -- !query
@@ -1782,13 +1888,13 @@ SELECT pmod(cast('1' as binary), '1')                        FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"BINARY\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"BINARY\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"pmod(CAST(1 AS BINARY), 1)\""
   },
   "queryContext" : [ {
@@ -1806,13 +1912,13 @@ SELECT pmod(cast(1 as boolean), '1')                         FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"BOOLEAN\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"BOOLEAN\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"pmod(CAST(1 AS BOOLEAN), 1)\""
   },
   "queryContext" : [ {
@@ -1830,13 +1936,13 @@ SELECT pmod(cast('2017-12-11 09:30:00.0' as timestamp), '1') FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"TIMESTAMP\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"TIMESTAMP\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"pmod(CAST(2017-12-11 09:30:00.0 AS TIMESTAMP), 1)\""
   },
   "queryContext" : [ {
@@ -1854,13 +1960,13 @@ SELECT pmod(cast('2017-12-11 09:30:00' as date), '1')        FROM t
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DATE\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"DATE\"",
+    "inputType" : "\"NUMERIC\"",
     "sqlExpr" : "\"pmod(CAST(2017-12-11 09:30:00 AS DATE), 1)\""
   },
   "queryContext" : [ {
@@ -1956,17 +2062,49 @@ true
 -- !query
 SELECT '1' = cast('2017-12-11 09:30:00.0' as timestamp) FROM t
 -- !query schema
-struct<(1 = CAST(2017-12-11 09:30:00.0 AS TIMESTAMP)):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 55,
+    "fragment" : "'1' = cast('2017-12-11 09:30:00.0' as timestamp)"
+  } ]
+}
 
 
 -- !query
 SELECT '1' = cast('2017-12-11 09:30:00' as date)        FROM t
 -- !query schema
-struct<(1 = CAST(2017-12-11 09:30:00 AS DATE)):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 48,
+    "fragment" : "'1' = cast('2017-12-11 09:30:00' as date)"
+  } ]
+}
 
 
 -- !query
@@ -2044,17 +2182,49 @@ true
 -- !query
 SELECT cast('2017-12-11 09:30:00.0' as timestamp) = '1' FROM t
 -- !query schema
-struct<(CAST(2017-12-11 09:30:00.0 AS TIMESTAMP) = 1):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 55,
+    "fragment" : "cast('2017-12-11 09:30:00.0' as timestamp) = '1'"
+  } ]
+}
 
 
 -- !query
 SELECT cast('2017-12-11 09:30:00' as date)        = '1' FROM t
 -- !query schema
-struct<(CAST(2017-12-11 09:30:00 AS DATE) = 1):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 55,
+    "fragment" : "cast('2017-12-11 09:30:00' as date)        = '1'"
+  } ]
+}
 
 
 -- !query
@@ -2140,17 +2310,49 @@ true
 -- !query
 SELECT '1' <=> cast('2017-12-11 09:30:00.0' as timestamp) FROM t
 -- !query schema
-struct<(1 <=> CAST(2017-12-11 09:30:00.0 AS TIMESTAMP)):boolean>
+struct<>
 -- !query output
-false
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 57,
+    "fragment" : "'1' <=> cast('2017-12-11 09:30:00.0' as timestamp)"
+  } ]
+}
 
 
 -- !query
 SELECT '1' <=> cast('2017-12-11 09:30:00' as date)        FROM t
 -- !query schema
-struct<(1 <=> CAST(2017-12-11 09:30:00 AS DATE)):boolean>
+struct<>
 -- !query output
-false
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 50,
+    "fragment" : "'1' <=> cast('2017-12-11 09:30:00' as date)"
+  } ]
+}
 
 
 -- !query
@@ -2228,17 +2430,49 @@ true
 -- !query
 SELECT cast('2017-12-11 09:30:00.0' as timestamp) <=> '1' FROM t
 -- !query schema
-struct<(CAST(2017-12-11 09:30:00.0 AS TIMESTAMP) <=> 1):boolean>
+struct<>
 -- !query output
-false
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 57,
+    "fragment" : "cast('2017-12-11 09:30:00.0' as timestamp) <=> '1'"
+  } ]
+}
 
 
 -- !query
 SELECT cast('2017-12-11 09:30:00' as date)        <=> '1' FROM t
 -- !query schema
-struct<(CAST(2017-12-11 09:30:00 AS DATE) <=> 1):boolean>
+struct<>
 -- !query output
-false
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 57,
+    "fragment" : "cast('2017-12-11 09:30:00' as date)        <=> '1'"
+  } ]
+}
 
 
 -- !query
@@ -2324,17 +2558,49 @@ false
 -- !query
 SELECT '1' < cast('2017-12-11 09:30:00.0' as timestamp) FROM t
 -- !query schema
-struct<(1 < CAST(2017-12-11 09:30:00.0 AS TIMESTAMP)):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 55,
+    "fragment" : "'1' < cast('2017-12-11 09:30:00.0' as timestamp)"
+  } ]
+}
 
 
 -- !query
 SELECT '1' < cast('2017-12-11 09:30:00' as date)        FROM t
 -- !query schema
-struct<(1 < CAST(2017-12-11 09:30:00 AS DATE)):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 48,
+    "fragment" : "'1' < cast('2017-12-11 09:30:00' as date)"
+  } ]
+}
 
 
 -- !query
@@ -2420,17 +2686,49 @@ true
 -- !query
 SELECT '1' <= cast('2017-12-11 09:30:00.0' as timestamp) FROM t
 -- !query schema
-struct<(1 <= CAST(2017-12-11 09:30:00.0 AS TIMESTAMP)):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 56,
+    "fragment" : "'1' <= cast('2017-12-11 09:30:00.0' as timestamp)"
+  } ]
+}
 
 
 -- !query
 SELECT '1' <= cast('2017-12-11 09:30:00' as date)        FROM t
 -- !query schema
-struct<(1 <= CAST(2017-12-11 09:30:00 AS DATE)):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 49,
+    "fragment" : "'1' <= cast('2017-12-11 09:30:00' as date)"
+  } ]
+}
 
 
 -- !query
@@ -2516,17 +2814,49 @@ false
 -- !query
 SELECT '1' > cast('2017-12-11 09:30:00.0' as timestamp) FROM t
 -- !query schema
-struct<(1 > CAST(2017-12-11 09:30:00.0 AS TIMESTAMP)):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 55,
+    "fragment" : "'1' > cast('2017-12-11 09:30:00.0' as timestamp)"
+  } ]
+}
 
 
 -- !query
 SELECT '1' > cast('2017-12-11 09:30:00' as date)        FROM t
 -- !query schema
-struct<(1 > CAST(2017-12-11 09:30:00 AS DATE)):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 48,
+    "fragment" : "'1' > cast('2017-12-11 09:30:00' as date)"
+  } ]
+}
 
 
 -- !query
@@ -2612,17 +2942,49 @@ true
 -- !query
 SELECT '1' >= cast('2017-12-11 09:30:00.0' as timestamp) FROM t
 -- !query schema
-struct<(1 >= CAST(2017-12-11 09:30:00.0 AS TIMESTAMP)):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 56,
+    "fragment" : "'1' >= cast('2017-12-11 09:30:00.0' as timestamp)"
+  } ]
+}
 
 
 -- !query
 SELECT '1' >= cast('2017-12-11 09:30:00' as date)        FROM t
 -- !query schema
-struct<(1 >= CAST(2017-12-11 09:30:00 AS DATE)):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 49,
+    "fragment" : "'1' >= cast('2017-12-11 09:30:00' as date)"
+  } ]
+}
 
 
 -- !query
@@ -2708,17 +3070,49 @@ false
 -- !query
 SELECT '1' <> cast('2017-12-11 09:30:00.0' as timestamp) FROM t
 -- !query schema
-struct<(NOT (1 = CAST(2017-12-11 09:30:00.0 AS TIMESTAMP))):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 56,
+    "fragment" : "'1' <> cast('2017-12-11 09:30:00.0' as timestamp)"
+  } ]
+}
 
 
 -- !query
 SELECT '1' <> cast('2017-12-11 09:30:00' as date)        FROM t
 -- !query schema
-struct<(NOT (1 = CAST(2017-12-11 09:30:00 AS DATE))):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 49,
+    "fragment" : "'1' <> cast('2017-12-11 09:30:00' as date)"
+  } ]
+}
 
 
 -- !query
@@ -2804,17 +3198,49 @@ false
 -- !query
 SELECT cast('2017-12-11 09:30:00.0' as timestamp) < '1' FROM t
 -- !query schema
-struct<(CAST(2017-12-11 09:30:00.0 AS TIMESTAMP) < 1):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 55,
+    "fragment" : "cast('2017-12-11 09:30:00.0' as timestamp) < '1'"
+  } ]
+}
 
 
 -- !query
 SELECT cast('2017-12-11 09:30:00' as date)        < '1' FROM t
 -- !query schema
-struct<(CAST(2017-12-11 09:30:00 AS DATE) < 1):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 55,
+    "fragment" : "cast('2017-12-11 09:30:00' as date)        < '1'"
+  } ]
+}
 
 
 -- !query
@@ -2900,17 +3326,49 @@ true
 -- !query
 SELECT cast('2017-12-11 09:30:00.0' as timestamp) <= '1' FROM t
 -- !query schema
-struct<(CAST(2017-12-11 09:30:00.0 AS TIMESTAMP) <= 1):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 56,
+    "fragment" : "cast('2017-12-11 09:30:00.0' as timestamp) <= '1'"
+  } ]
+}
 
 
 -- !query
 SELECT cast('2017-12-11 09:30:00' as date)        <= '1' FROM t
 -- !query schema
-struct<(CAST(2017-12-11 09:30:00 AS DATE) <= 1):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 56,
+    "fragment" : "cast('2017-12-11 09:30:00' as date)        <= '1'"
+  } ]
+}
 
 
 -- !query
@@ -2996,17 +3454,49 @@ false
 -- !query
 SELECT cast('2017-12-11 09:30:00.0' as timestamp) > '1' FROM t
 -- !query schema
-struct<(CAST(2017-12-11 09:30:00.0 AS TIMESTAMP) > 1):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 55,
+    "fragment" : "cast('2017-12-11 09:30:00.0' as timestamp) > '1'"
+  } ]
+}
 
 
 -- !query
 SELECT cast('2017-12-11 09:30:00' as date)        > '1' FROM t
 -- !query schema
-struct<(CAST(2017-12-11 09:30:00 AS DATE) > 1):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 55,
+    "fragment" : "cast('2017-12-11 09:30:00' as date)        > '1'"
+  } ]
+}
 
 
 -- !query
@@ -3092,17 +3582,49 @@ true
 -- !query
 SELECT cast('2017-12-11 09:30:00.0' as timestamp) >= '1' FROM t
 -- !query schema
-struct<(CAST(2017-12-11 09:30:00.0 AS TIMESTAMP) >= 1):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 56,
+    "fragment" : "cast('2017-12-11 09:30:00.0' as timestamp) >= '1'"
+  } ]
+}
 
 
 -- !query
 SELECT cast('2017-12-11 09:30:00' as date)        >= '1' FROM t
 -- !query schema
-struct<(CAST(2017-12-11 09:30:00 AS DATE) >= 1):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 56,
+    "fragment" : "cast('2017-12-11 09:30:00' as date)        >= '1'"
+  } ]
+}
 
 
 -- !query
@@ -3188,17 +3710,49 @@ false
 -- !query
 SELECT cast('2017-12-11 09:30:00.0' as timestamp) <> '1' FROM t
 -- !query schema
-struct<(NOT (CAST(2017-12-11 09:30:00.0 AS TIMESTAMP) = 1)):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"TIMESTAMP\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 56,
+    "fragment" : "cast('2017-12-11 09:30:00.0' as timestamp) <> '1'"
+  } ]
+}
 
 
 -- !query
 SELECT cast('2017-12-11 09:30:00' as date)        <> '1' FROM t
 -- !query schema
-struct<(NOT (CAST(2017-12-11 09:30:00 AS DATE) = 1)):boolean>
+struct<>
 -- !query output
-NULL
+org.apache.spark.SparkDateTimeException
+{
+  "errorClass" : "CAST_INVALID_INPUT",
+  "sqlState" : "22018",
+  "messageParameters" : {
+    "expression" : "'1'",
+    "sourceType" : "\"STRING\"",
+    "targetType" : "\"DATE\""
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 56,
+    "fragment" : "cast('2017-12-11 09:30:00' as date)        <> '1'"
+  } ]
+}
 
 
 -- !query

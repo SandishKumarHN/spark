@@ -20,13 +20,13 @@ package org.apache.spark.sql.kafka010
 import java.{util => ju}
 import java.util.{Locale, UUID}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.common.serialization.{ByteArrayDeserializer, ByteArraySerializer}
 
-import org.apache.spark.internal.Logging
+import org.apache.spark.internal.{Logging, LogKeys, MDC}
 import org.apache.spark.kafka010.KafkaConfigUpdater
 import org.apache.spark.sql.{AnalysisException, DataFrame, SaveMode, SQLContext}
 import org.apache.spark.sql.catalyst.util.CaseInsensitiveMap
@@ -41,6 +41,7 @@ import org.apache.spark.sql.sources._
 import org.apache.spark.sql.streaming.OutputMode
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.util.ArrayImplicits._
 
 /**
  * The provider class for all Kafka readers and writers. It is designed such that it throws
@@ -161,7 +162,7 @@ private[kafka010] class KafkaSourceProvider extends DataSourceRegister
     val caseInsensitiveParameters = CaseInsensitiveMap(parameters)
     val defaultTopic = caseInsensitiveParameters.get(TOPIC_OPTION_KEY).map(_.trim)
     val specifiedKafkaParams = kafkaParamsForProducer(caseInsensitiveParameters)
-    new KafkaSink(sqlContext, specifiedKafkaParams, defaultTopic)
+    new KafkaSink(specifiedKafkaParams, defaultTopic)
   }
 
   override def createRelation(
@@ -171,16 +172,18 @@ private[kafka010] class KafkaSourceProvider extends DataSourceRegister
       data: DataFrame): BaseRelation = {
     mode match {
       case SaveMode.Overwrite | SaveMode.Ignore =>
-        throw new AnalysisException(s"Save mode $mode not allowed for Kafka. " +
-          s"Allowed save modes are ${SaveMode.Append} and " +
-          s"${SaveMode.ErrorIfExists} (default).")
+        throw new AnalysisException(
+          errorClass = "_LEGACY_ERROR_TEMP_3081",
+          messageParameters = Map(
+            "mode" -> mode.toString,
+            "append" -> SaveMode.Append.toString,
+            "errorIfExists" -> SaveMode.ErrorIfExists.toString))
       case _ => // good
     }
     val caseInsensitiveParameters = CaseInsensitiveMap(parameters)
     val topic = caseInsensitiveParameters.get(TOPIC_OPTION_KEY).map(_.trim)
     val specifiedKafkaParams = kafkaParamsForProducer(caseInsensitiveParameters)
-    KafkaWriter.write(outerSQLContext.sparkSession, data.queryExecution, specifiedKafkaParams,
-      topic)
+    KafkaWriter.write(data.queryExecution, specifiedKafkaParams, topic)
 
     /* This method is suppose to return a relation that reads the data that was written.
      * We cannot support this for Kafka. Therefore, in order to make things consistent,
@@ -205,7 +208,7 @@ private[kafka010] class KafkaSourceProvider extends DataSourceRegister
       case (ASSIGN, value) =>
         AssignStrategy(JsonUtils.partitions(value))
       case (SUBSCRIBE, value) =>
-        SubscribeStrategy(value.split(",").map(_.trim()).filter(_.nonEmpty))
+        SubscribeStrategy(value.split(",").map(_.trim()).filter(_.nonEmpty).toImmutableArraySeq)
       case (SUBSCRIBE_PATTERN, value) =>
         SubscribePatternStrategy(value.trim())
       case _ =>
@@ -268,13 +271,21 @@ private[kafka010] class KafkaSourceProvider extends DataSourceRegister
       if (p <= 0) throw new IllegalArgumentException("minPartitions must be positive")
     }
 
+    if (params.contains(MAX_RECORDS_PER_PARTITION_OPTION_KEY)) {
+      val p = params(MAX_RECORDS_PER_PARTITION_OPTION_KEY).toLong
+      if (p <= 0) {
+        throw new IllegalArgumentException(
+          s"$MAX_RECORDS_PER_PARTITION_OPTION_KEY must be positive")
+      }
+    }
+
     // Validate user-specified Kafka options
 
     if (params.contains(s"kafka.${ConsumerConfig.GROUP_ID_CONFIG}")) {
       logWarning(CUSTOM_GROUP_ID_ERROR_MESSAGE)
       if (params.contains(GROUP_ID_PREFIX)) {
-        logWarning("Option 'groupIdPrefix' will be ignored as " +
-          s"option 'kafka.${ConsumerConfig.GROUP_ID_CONFIG}' has been set.")
+        logWarning(log"Option groupIdPrefix will be ignored as " +
+          log"option kafka.${MDC(LogKeys.CONFIG, ConsumerConfig.GROUP_ID_CONFIG)} has been set.")
       }
     }
 
@@ -525,6 +536,9 @@ private[kafka010] class KafkaSourceProvider extends DataSourceRegister
     override def supportedCustomMetrics(): Array[CustomMetric] = {
       Array(new OffsetOutOfRangeMetric, new DataLossMetric)
     }
+
+    override def columnarSupportMode(): Scan.ColumnarSupportMode =
+      Scan.ColumnarSupportMode.UNSUPPORTED
   }
 }
 
@@ -551,6 +565,7 @@ private[kafka010] object KafkaSourceProvider extends Logging {
   private[kafka010] val ENDING_TIMESTAMP_OPTION_KEY = "endingtimestamp"
   private val FAIL_ON_DATA_LOSS_OPTION_KEY = "failondataloss"
   private[kafka010] val MIN_PARTITIONS_OPTION_KEY = "minpartitions"
+  private[kafka010] val MAX_RECORDS_PER_PARTITION_OPTION_KEY = "maxrecordsperpartition"
   private[kafka010] val MAX_OFFSET_PER_TRIGGER = "maxoffsetspertrigger"
   private[kafka010] val MIN_OFFSET_PER_TRIGGER = "minoffsetspertrigger"
   private[kafka010] val MAX_TRIGGER_DELAY = "maxtriggerdelay"
@@ -577,14 +592,6 @@ private[kafka010] object KafkaSourceProvider extends Logging {
       | data was aged out by Kafka or the topic may have been deleted before all the data in the
       | topic was processed. If you want your streaming query to fail on such cases, set the source
       | option "failOnDataLoss" to "true".
-    """.stripMargin
-
-  val INSTRUCTION_FOR_FAIL_ON_DATA_LOSS_TRUE =
-    """
-      |Some data may have been lost because they are not available in Kafka any more; either the
-      | data was aged out by Kafka or the topic may have been deleted before all the data in the
-      | topic was processed. If you don't want your streaming query to fail on such cases, set the
-      | source option "failOnDataLoss" to "false".
     """.stripMargin
 
   val CUSTOM_GROUP_ID_ERROR_MESSAGE =

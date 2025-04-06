@@ -26,6 +26,7 @@ Grouping
 
     GroupedData.agg
     GroupedData.apply
+    GroupedData.applyInArrow
     GroupedData.applyInPandas
     GroupedData.applyInPandasWithState
     GroupedData.avg
@@ -36,4 +37,6 @@ Grouping
     GroupedData.min
     GroupedData.pivot
     GroupedData.sum
+    GroupedData.transformWithStateInPandas
+    PandasCogroupedOps.applyInArrow
     PandasCogroupedOps.applyInPandas

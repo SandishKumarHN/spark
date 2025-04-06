@@ -19,6 +19,8 @@ package org.apache.spark.scheduler
 
 import java.util.Properties
 
+import scala.concurrent.Promise
+
 import org.apache.spark._
 import org.apache.spark.rdd.RDD
 import org.apache.spark.util.{AccumulatorV2, CallSite}
@@ -39,6 +41,7 @@ private[scheduler] case class JobSubmitted(
     partitions: Array[Int],
     callSite: CallSite,
     listener: JobListener,
+    artifactSet: JobArtifactSet,
     properties: Properties = null)
   extends DAGSchedulerEvent
 
@@ -48,6 +51,7 @@ private[scheduler] case class MapStageSubmitted(
   dependency: ShuffleDependency[_, _, _],
   callSite: CallSite,
   listener: JobListener,
+  artifactSet: JobArtifactSet,
   properties: Properties = null)
   extends DAGSchedulerEvent
 
@@ -61,7 +65,16 @@ private[scheduler] case class JobCancelled(
     reason: Option[String])
   extends DAGSchedulerEvent
 
-private[scheduler] case class JobGroupCancelled(groupId: String) extends DAGSchedulerEvent
+private[scheduler] case class JobGroupCancelled(
+    groupId: String,
+    cancelFutureJobs: Boolean = false,
+    reason: Option[String])
+  extends DAGSchedulerEvent
+
+private[scheduler] case class JobTagCancelled(
+    tagName: String,
+    reason: Option[String],
+    cancelledJobs: Option[Promise[Seq[ActiveJob]]]) extends DAGSchedulerEvent
 
 private[scheduler] case object AllJobsCancelled extends DAGSchedulerEvent
 

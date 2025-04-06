@@ -34,6 +34,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import org.fusesource.leveldbjni.JniDBFactory;
 import org.iq80.leveldb.DB;
+import org.iq80.leveldb.DBIterator;
 import org.iq80.leveldb.Options;
 import org.iq80.leveldb.WriteBatch;
 
@@ -176,7 +177,7 @@ public class LevelDB implements KVStore {
 
       // Deserialize outside synchronized block
       List<byte[]> list = new ArrayList<>(entry.getValue().size());
-      for (Object value : values) {
+      for (Object value : entry.getValue()) {
         list.add(serializer.serialize(value));
       }
       serializedValueIter = list.iterator();
@@ -190,6 +191,7 @@ public class LevelDB implements KVStore {
 
         try (WriteBatch batch = db().createWriteBatch()) {
           while (valueIter.hasNext()) {
+            assert serializedValueIter.hasNext();
             updateBatch(batch, valueIter.next(), serializedValueIter.next(), klass,
               naturalIndex, indices);
           }
@@ -254,7 +256,8 @@ public class LevelDB implements KVStore {
           iteratorTracker.add(new WeakReference<>(it));
           return it;
         } catch (Exception e) {
-          throw Throwables.propagate(e);
+          Throwables.throwIfUnchecked(e);
+          throw new RuntimeException(e);
         }
       }
     };
@@ -326,7 +329,7 @@ public class LevelDB implements KVStore {
    * Closes the given iterator if the DB is still open. Trying to close a JNI LevelDB handle
    * with a closed DB can cause JVM crashes, so this ensures that situation does not happen.
    */
-  void closeIterator(LevelDBIterator<?> it) throws IOException {
+  void closeIterator(DBIterator it) throws IOException {
     notifyIteratorClosed(it);
     synchronized (this._db) {
       DB _db = this._db.get();
@@ -340,8 +343,11 @@ public class LevelDB implements KVStore {
    * Remove iterator from iterator tracker. `LevelDBIterator` calls it to notify
    * iterator is closed.
    */
-  void notifyIteratorClosed(LevelDBIterator<?> it) {
-    iteratorTracker.removeIf(ref -> it.equals(ref.get()));
+  void notifyIteratorClosed(DBIterator dbIterator) {
+    iteratorTracker.removeIf(ref -> {
+      LevelDBIterator<?> it = ref.get();
+      return it != null && dbIterator.equals(it.internalIterator());
+    });
   }
 
   /** Returns metadata about indices for the given type. */

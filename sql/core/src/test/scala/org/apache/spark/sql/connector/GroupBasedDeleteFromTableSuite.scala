@@ -17,18 +17,56 @@
 
 package org.apache.spark.sql.connector
 
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.catalyst.expressions.DynamicPruningExpression
-import org.apache.spark.sql.catalyst.types.DataTypeUtils
-import org.apache.spark.sql.execution.InSubqueryExec
-import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
+import org.apache.spark.sql.{AnalysisException, Row}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.StructType
-import org.apache.spark.unsafe.types.UTF8String
 
 class GroupBasedDeleteFromTableSuite extends DeleteFromTableSuiteBase {
 
   import testImplicits._
+
+  test("delete preserves metadata columns for carried-over records") {
+    createAndInitTable("pk INT NOT NULL, id INT, dep STRING",
+      """{ "pk": 1, "id": 1, "dep": "hr" }
+        |{ "pk": 2, "id": 2, "dep": "software" }
+        |{ "pk": 3, "id": 3, "dep": "hr" }
+        |{ "pk": 4, "id": 4, "dep": "hr" }
+        |""".stripMargin)
+
+    sql(s"DELETE FROM $tableNameAsString WHERE id IN (1, 100)")
+
+    checkAnswer(
+      sql(s"SELECT * FROM $tableNameAsString"),
+      Row(2, 2, "software") :: Row(3, 3, "hr") :: Row(4, 4, "hr") :: Nil)
+
+    checkLastWriteInfo(
+      expectedRowSchema = table.schema,
+      expectedMetadataSchema = Some(StructType(Array(PARTITION_FIELD, INDEX_FIELD))))
+
+    checkLastWriteLog(
+      writeWithMetadataLogEntry(metadata = Row("hr", 1), data = Row(3, 3, "hr")),
+      writeWithMetadataLogEntry(metadata = Row("hr", 2), data = Row(4, 4, "hr")))
+  }
+
+  test("delete with nondeterministic conditions") {
+    createAndInitTable("pk INT NOT NULL, id INT, dep STRING",
+      """{ "pk": 1, "id": 1, "dep": "hr" }
+        |{ "pk": 2, "id": 2, "dep": "software" }
+        |{ "pk": 3, "id": 3, "dep": "hr" }
+        |""".stripMargin)
+
+    checkError(
+      exception = intercept[AnalysisException](
+        sql(s"DELETE FROM $tableNameAsString WHERE id <= 1 AND rand() > 0.5")),
+      condition = "INVALID_NON_DETERMINISTIC_EXPRESSIONS",
+      parameters = Map(
+        "sqlExprs" -> "\"((id <= 1) AND (rand() > 0.5))\", \"((id <= 1) AND (rand() > 0.5))\""),
+      context = ExpectedContext(
+        fragment = "DELETE FROM cat.ns1.test_table WHERE id <= 1 AND rand() > 0.5",
+        start = 0,
+        stop = 60)
+    )
+  }
 
   test("delete with IN predicate and runtime group filtering") {
     createAndInitTable("id INT, salary INT, dep STRING",
@@ -37,10 +75,10 @@ class GroupBasedDeleteFromTableSuite extends DeleteFromTableSuiteBase {
         |{ "id": 3, "salary": 120, "dep": 'hr' }
         |""".stripMargin)
 
-    executeDeleteAndCheckScans(
+    executeAndCheckScans(
       s"DELETE FROM $tableNameAsString WHERE salary IN (300, 400, 500)",
-      primaryScanSchema = "id INT, salary INT, dep STRING, _partition STRING",
-      groupFilterScanSchema = "salary INT, dep STRING")
+      primaryScanSchema = "id INT, salary INT, dep STRING, _partition STRING, index INT",
+      groupFilterScanSchema = Some("salary INT, dep STRING"))
 
     checkAnswer(
       sql(s"SELECT * FROM $tableNameAsString"),
@@ -64,15 +102,15 @@ class GroupBasedDeleteFromTableSuite extends DeleteFromTableSuiteBase {
       val deletedDepDF = Seq(Some("software"), None).toDF()
       deletedDepDF.createOrReplaceTempView("deleted_dep")
 
-      executeDeleteAndCheckScans(
+      executeAndCheckScans(
         s"""DELETE FROM $tableNameAsString
            |WHERE
            | id IN (SELECT * FROM deleted_id)
            | AND
            | dep IN (SELECT * FROM deleted_dep)
            |""".stripMargin,
-        primaryScanSchema = "id INT, salary INT, dep STRING, _partition STRING",
-        groupFilterScanSchema = "id INT, dep STRING")
+        primaryScanSchema = "id INT, salary INT, dep STRING, _partition STRING, index INT",
+        groupFilterScanSchema = Some("id INT, dep STRING"))
 
       checkAnswer(
         sql(s"SELECT * FROM $tableNameAsString"),
@@ -117,10 +155,10 @@ class GroupBasedDeleteFromTableSuite extends DeleteFromTableSuiteBase {
       val deletedIdDF = Seq(Some(1), None).toDF()
       deletedIdDF.createOrReplaceTempView("deleted_id")
 
-      executeDeleteAndCheckScans(
+      executeAndCheckScans(
         s"DELETE FROM $tableNameAsString WHERE id IN (SELECT * FROM deleted_id)",
-        primaryScanSchema = "id INT, salary INT, dep STRING, _partition STRING",
-        groupFilterScanSchema = "id INT, dep STRING")
+        primaryScanSchema = "id INT, salary INT, dep STRING, _partition STRING, index INT",
+        groupFilterScanSchema = Some("id INT, dep STRING"))
 
       checkAnswer(
         sql(s"SELECT * FROM $tableNameAsString"),
@@ -128,41 +166,5 @@ class GroupBasedDeleteFromTableSuite extends DeleteFromTableSuiteBase {
 
       checkReplacedPartitions(Seq("hr"))
     }
-  }
-
-  private def executeDeleteAndCheckScans(
-      query: String,
-      primaryScanSchema: String,
-      groupFilterScanSchema: String): Unit = {
-
-    val executedPlan = executeAndKeepPlan {
-      sql(query)
-    }
-
-    val primaryScan = collect(executedPlan) {
-      case s: BatchScanExec => s
-    }.head
-    assert(DataTypeUtils.sameType(primaryScan.schema, StructType.fromDDL(primaryScanSchema)))
-
-    primaryScan.runtimeFilters match {
-      case Seq(DynamicPruningExpression(child: InSubqueryExec)) =>
-        val groupFilterScan = collect(child.plan) {
-          case s: BatchScanExec => s
-        }.head
-        assert(DataTypeUtils.sameType(groupFilterScan.schema,
-          StructType.fromDDL(groupFilterScanSchema)))
-
-      case _ =>
-        fail("could not find group filter scan")
-    }
-  }
-
-  private def checkReplacedPartitions(expectedPartitions: Seq[Any]): Unit = {
-    val actualPartitions = table.replacedPartitions.map {
-      case Seq(partValue: UTF8String) => partValue.toString
-      case Seq(partValue) => partValue
-      case other => fail(s"expected only one partition value: $other" )
-    }
-    assert(actualPartitions == expectedPartitions, "replaced partitions must match")
   }
 }

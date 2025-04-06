@@ -164,7 +164,7 @@ SELECT COUNT(*) OVER (PARTITION BY 1 ORDER BY cast(1 as string) DESC RANGE BETWE
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.SPECIFIED_WINDOW_FRAME_UNACCEPTED_TYPE",
   "sqlState" : "42K09",
@@ -189,15 +189,14 @@ SELECT COUNT(*) OVER (PARTITION BY 1 ORDER BY cast('1' as binary) DESC RANGE BET
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.SPECIFIED_WINDOW_FRAME_UNACCEPTED_TYPE",
+  "errorClass" : "DATATYPE_MISMATCH.RANGE_FRAME_INVALID_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "expectedType" : "(\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\")",
-    "exprType" : "\"BINARY\"",
-    "location" : "upper",
-    "sqlExpr" : "\"RANGE BETWEEN CURRENT ROW AND 1 FOLLOWING\""
+    "orderSpecType" : "\"BINARY\"",
+    "sqlExpr" : "\"(PARTITION BY 1 ORDER BY CAST(1 AS BINARY) DESC NULLS LAST RANGE BETWEEN CURRENT ROW AND 1 FOLLOWING)\"",
+    "valueBoundaryType" : "\"INT\""
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -214,7 +213,7 @@ SELECT COUNT(*) OVER (PARTITION BY 1 ORDER BY cast(1 as boolean) DESC RANGE BETW
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.SPECIFIED_WINDOW_FRAME_UNACCEPTED_TYPE",
   "sqlState" : "42K09",
@@ -239,7 +238,7 @@ SELECT COUNT(*) OVER (PARTITION BY 1 ORDER BY cast('2017-12-11 09:30:00.0' as ti
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.RANGE_FRAME_INVALID_TYPE",
   "sqlState" : "42K09",

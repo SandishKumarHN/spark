@@ -22,6 +22,7 @@ import java.util.Objects;
 import javax.annotation.Nullable;
 
 import org.apache.spark.annotation.Evolving;
+import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.types.DataType;
 
 /**
@@ -246,6 +247,17 @@ public interface TableChange {
    */
   static TableChange deleteColumn(String[] fieldNames, Boolean ifExists) {
     return new DeleteColumn(fieldNames, ifExists);
+  }
+
+  /**
+   * Create a TableChange for changing clustering columns for a table.
+   *
+   * @param clusteringColumns clustering columns to change to. Each clustering column represents
+   *                          field names.
+   * @return a TableChange for this assignment
+   */
+  static TableChange clusterBy(NamedReference[] clusteringColumns) {
+    return new ClusterBy(clusteringColumns);
   }
 
   /**
@@ -696,9 +708,8 @@ public interface TableChange {
     /**
      * Returns the column default value SQL string (Spark SQL dialect). The default value literal
      * is not provided as updating column default values does not need to back-fill existing data.
-     * Null means dropping the column default value.
+     * Empty string means dropping the column default value.
      */
-    @Nullable
     public String newDefaultValue() { return newDefaultValue; }
 
     @Override
@@ -753,4 +764,27 @@ public interface TableChange {
     }
   }
 
+  /** A TableChange to alter clustering columns for a table. */
+  final class ClusterBy implements TableChange {
+    private final NamedReference[] clusteringColumns;
+
+    private ClusterBy(NamedReference[] clusteringColumns) {
+      this.clusteringColumns = clusteringColumns;
+    }
+
+    public NamedReference[] clusteringColumns() { return clusteringColumns; }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      ClusterBy that = (ClusterBy) o;
+      return Arrays.equals(clusteringColumns, that.clusteringColumns());
+    }
+
+    @Override
+    public int hashCode() {
+      return Arrays.hashCode(clusteringColumns);
+    }
+  }
 }

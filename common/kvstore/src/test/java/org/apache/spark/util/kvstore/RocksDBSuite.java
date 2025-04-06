@@ -18,6 +18,9 @@
 package org.apache.spark.util.kvstore;
 
 import java.io.File;
+import java.lang.ref.Reference;
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
@@ -28,19 +31,19 @@ import java.util.stream.StreamSupport;
 
 import com.google.common.collect.ImmutableSet;
 import org.apache.commons.io.FileUtils;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.rocksdb.RocksIterator;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class RocksDBSuite {
 
   private RocksDB db;
   private File dbpath;
 
-  @After
+  @AfterEach
   public void cleanup() throws Exception {
     if (db != null) {
       db.close();
@@ -50,7 +53,7 @@ public class RocksDBSuite {
     }
   }
 
-  @Before
+  @BeforeEach
   public void setup() throws Exception {
     dbpath = File.createTempFile("test.", ".rdb");
     dbpath.delete();
@@ -381,6 +384,73 @@ public class RocksDBSuite {
     assertFalse(iter.skip(1));
   }
 
+  @Test
+  public void testResourceCleaner() throws Exception {
+    File dbPathForCleanerTest = File.createTempFile(
+      "test_db_cleaner.", ".rdb");
+    dbPathForCleanerTest.delete();
+
+    RocksDB dbForCleanerTest = new RocksDB(dbPathForCleanerTest);
+    try {
+      for (int i = 0; i < 8192; i++) {
+        dbForCleanerTest.write(createCustomType1(i));
+      }
+      RocksDBIterator<CustomType1> rocksDBIterator =
+        (RocksDBIterator<CustomType1>) dbForCleanerTest.view(CustomType1.class).iterator();
+      Reference<RocksDBIterator<?>> reference = new WeakReference<>(rocksDBIterator);
+      assertNotNull(reference);
+      RocksDBIterator.ResourceCleaner resourceCleaner = rocksDBIterator.getResourceCleaner();
+      assertFalse(resourceCleaner.isCompleted());
+      // Manually set rocksDBIterator to null, to be GC.
+      rocksDBIterator = null;
+      // 100 times gc, the rocksDBIterator should be GCed.
+      int count = 0;
+      while (count < 100 && !reference.refersTo(null)) {
+        System.gc();
+        count++;
+        Thread.sleep(100);
+      }
+      // check rocksDBIterator should be GCed
+      assertTrue(reference.refersTo(null));
+      // Verify that the Cleaner will be executed after a period of time,
+      // and status will become false.
+      assertTrue(resourceCleaner.isCompleted());
+    } finally {
+      dbForCleanerTest.close();
+      FileUtils.deleteQuietly(dbPathForCleanerTest);
+    }
+  }
+
+  @Test
+  public void testMultipleTypesWriteAll() throws Exception {
+
+    List<CustomType1> type1List = Arrays.asList(
+      createCustomType1(1),
+      createCustomType1(2),
+      createCustomType1(3),
+      createCustomType1(4)
+    );
+
+    List<CustomType2> type2List = Arrays.asList(
+      createCustomType2(10),
+      createCustomType2(11),
+      createCustomType2(12),
+      createCustomType2(13)
+    );
+
+    List fullList = new ArrayList();
+    fullList.addAll(type1List);
+    fullList.addAll(type2List);
+
+    db.writeAll(fullList);
+    for (CustomType1 value : type1List) {
+      assertEquals(value, db.read(value.getClass(), value.key));
+    }
+    for (CustomType2 value : type2List) {
+      assertEquals(value, db.read(value.getClass(), value.key));
+    }
+  }
+
   private CustomType1 createCustomType1(int i) {
     CustomType1 t = new CustomType1();
     t.key = "key" + i;
@@ -388,6 +458,14 @@ public class RocksDBSuite {
     t.name = "name" + i;
     t.num = i;
     t.child = "child" + i;
+    return t;
+  }
+
+  private CustomType2 createCustomType2(int i) {
+    CustomType2 t = new CustomType2();
+    t.key = "key" + i;
+    t.id = "id" + i;
+    t.parentId = "parent_id" + (i / 2);
     return t;
   }
 

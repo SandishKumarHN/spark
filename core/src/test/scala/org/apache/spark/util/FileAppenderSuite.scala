@@ -54,11 +54,11 @@ class FileAppenderSuite extends SparkFunSuite with BeforeAndAfter {
     val inputStream = new ByteArrayInputStream(testString.getBytes(StandardCharsets.UTF_8))
     // The `header` should not be covered
     val header = "Add header"
-    Files.write(header, testFile, StandardCharsets.UTF_8)
+    Files.asCharSink(testFile, StandardCharsets.UTF_8).write(header)
     val appender = new FileAppender(inputStream, testFile)
     inputStream.close()
     appender.awaitTermination()
-    assert(Files.toString(testFile, StandardCharsets.UTF_8) === header + testString)
+    assert(Files.asCharSource(testFile, StandardCharsets.UTF_8).read() === header + testString)
   }
 
   test("SPARK-35027: basic file appender - close stream") {
@@ -192,9 +192,9 @@ class FileAppenderSuite extends SparkFunSuite with BeforeAndAfter {
 
     // verify whether the earliest file has been deleted
     val rolledOverFiles = allGeneratedFiles.filter { _ != testFile.toString }.toArray.sorted
-    logInfo(s"All rolled over files generated:${rolledOverFiles.size}\n" +
+    logInfo(s"All rolled over files generated:${rolledOverFiles.length}\n" +
       rolledOverFiles.mkString("\n"))
-    assert(rolledOverFiles.size > 2)
+    assert(rolledOverFiles.length > 2)
     val earliestRolledOverFile = rolledOverFiles.head
     val existingRolledOverFiles = RollingFileAppender.getSortedRolledOverFiles(
       testFile.getParentFile.toString, testFile.getName).map(_.toString)
@@ -340,7 +340,7 @@ class FileAppenderSuite extends SparkFunSuite with BeforeAndAfter {
 
       // Make sure no IOException errors have been logged as a result of appender closing gracefully
       verify(mockAppender, atLeast(0)).append(loggingEventCaptor.capture)
-      import scala.collection.JavaConverters._
+      import scala.jdk.CollectionConverters._
       loggingEventCaptor.getAllValues.asScala.foreach { loggingEvent =>
         assert(loggingEvent.getThrown === null
           || !loggingEvent.getThrown.isInstanceOf[IOException])
@@ -392,7 +392,7 @@ class FileAppenderSuite extends SparkFunSuite with BeforeAndAfter {
           IOUtils.closeQuietly(inputStream)
         }
       } else {
-        Files.toString(file, StandardCharsets.UTF_8)
+        Files.asCharSource(file, StandardCharsets.UTF_8).read()
       }
     }.mkString("")
     assert(allText === expectedText)

@@ -121,6 +121,9 @@ class IDFModel private[ml] (
 
   import IDFModel._
 
+  // For ml connect only
+  private[ml] def this() = this("", null)
+
   /** @group setParam */
   @Since("1.4.0")
   def setInputCol(value: String): this.type = set(inputCol, value)
@@ -198,10 +201,10 @@ object IDFModel extends MLReadable[IDFModel] {
     private case class Data(idf: Vector, docFreq: Array[Long], numDocs: Long)
 
     override protected def saveImpl(path: String): Unit = {
-      DefaultParamsWriter.saveMetadata(instance, path, sc)
+      DefaultParamsWriter.saveMetadata(instance, path, sparkSession)
       val data = Data(instance.idf, instance.docFreq, instance.numDocs)
       val dataPath = new Path(path, "data").toString
-      sparkSession.createDataFrame(Seq(data)).repartition(1).write.parquet(dataPath)
+      sparkSession.createDataFrame(Seq(data)).write.parquet(dataPath)
     }
   }
 
@@ -210,7 +213,7 @@ object IDFModel extends MLReadable[IDFModel] {
     private val className = classOf[IDFModel].getName
 
     override def load(path: String): IDFModel = {
-      val metadata = DefaultParamsReader.loadMetadata(path, sc, className)
+      val metadata = DefaultParamsReader.loadMetadata(path, sparkSession, className)
       val dataPath = new Path(path, "data").toString
       val data = sparkSession.read.parquet(dataPath)
 

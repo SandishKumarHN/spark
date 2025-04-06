@@ -80,7 +80,7 @@ trait DeleteFromTests extends DatasourceV2SQLBase {
         sql(s"DELETE FROM $t WHERE id IN (SELECT id FROM $t)")
       }
 
-      assert(spark.table(t).count === 3)
+      assert(spark.table(t).count() === 3)
       assert(exc.getMessage.contains("Delete by condition with subquery is not supported"))
     }
   }
@@ -94,14 +94,14 @@ trait DeleteFromTests extends DatasourceV2SQLBase {
         sql(s"DELETE FROM $t WHERE id > 3 AND p > 3")
       }
 
-      assert(spark.table(t).count === 3)
+      assert(spark.table(t).count() === 3)
       assert(exc.getMessage.contains(s"Cannot delete from table $t"))
     }
   }
 
   test("DeleteFrom: DELETE is only supported with v2 tables") {
-    // unset this config to use the default v2 session catalog.
-    spark.conf.unset(V2_SESSION_CATALOG_IMPLEMENTATION.key)
+    // use the default v2 session catalog.
+    spark.conf.set(V2_SESSION_CATALOG_IMPLEMENTATION, "builtin")
     val v1Table = "tbl"
     withTable(v1Table) {
       sql(s"CREATE TABLE $v1Table" +
@@ -112,7 +112,7 @@ trait DeleteFromTests extends DatasourceV2SQLBase {
 
       checkError(
         exception = exc,
-        errorClass = "UNSUPPORTED_FEATURE.TABLE_OPERATION",
+        condition = "UNSUPPORTED_FEATURE.TABLE_OPERATION",
         sqlState = "0A000",
         parameters = Map("tableName" -> "`spark_catalog`.`default`.`tbl`",
           "operation" -> "DELETE"))

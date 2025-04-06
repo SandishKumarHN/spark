@@ -19,8 +19,7 @@ package org.apache.spark
 
 import java.net.URL
 
-import scala.collection.JavaConverters._
-import scala.collection.immutable.Map
+import scala.jdk.CollectionConverters._
 
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.core.`type`.TypeReference
@@ -32,8 +31,8 @@ import org.apache.spark.annotation.DeveloperApi
 
 /**
  * A reader to load error information from one or more JSON files. Note that, if one error appears
- * in more than one JSON files, the latter wins. Please read core/src/main/resources/error/README.md
- * for more details.
+ * in more than one JSON files, the latter wins.
+ * Please read common/utils/src/main/resources/error/README.md for more details.
  */
 @DeveloperApi
 class ErrorClassesJsonReader(jsonFileURLs: Seq[URL]) {
@@ -43,18 +42,41 @@ class ErrorClassesJsonReader(jsonFileURLs: Seq[URL]) {
   private[spark] val errorInfoMap =
     jsonFileURLs.map(ErrorClassesJsonReader.readAsMap).reduce(_ ++ _)
 
-  def getErrorMessage(errorClass: String, messageParameters: Map[String, String]): String = {
+  def getErrorMessage(errorClass: String, messageParameters: Map[String, Any]): String = {
     val messageTemplate = getMessageTemplate(errorClass)
-    val sub = new StringSubstitutor(messageParameters.asJava)
+    val sanitizedParameters = messageParameters.map {
+      case (key, null) => key -> "null"
+      case (key, value) => key -> value
+    }
+    val sub = new StringSubstitutor(sanitizedParameters.asJava)
     sub.setEnableUndefinedVariableException(true)
     sub.setDisableSubstitutionInValues(true)
-    try {
-      sub.replace(messageTemplate.replaceAll("<([a-zA-Z0-9_-]+)>", "\\$\\{$1\\}"))
+    val errorMessage = try {
+      sub.replace(ErrorClassesJsonReader.TEMPLATE_REGEX.replaceAllIn(
+        messageTemplate, "\\$\\{$1\\}"))
     } catch {
-      case _: IllegalArgumentException => throw SparkException.internalError(
-        s"Undefined error message parameter for error class: '$errorClass'. " +
-          s"Parameters: $messageParameters")
+      case i: IllegalArgumentException => throw SparkException.internalError(
+        s"Undefined error message parameter for error class: '$errorClass', " +
+          s"MessageTemplate: $messageTemplate, " +
+          s"Parameters: $messageParameters", i)
     }
+    if (util.SparkEnvUtils.isTesting) {
+      val placeHoldersNum = ErrorClassesJsonReader.TEMPLATE_REGEX.findAllIn(messageTemplate).length
+      if (placeHoldersNum < sanitizedParameters.size) {
+        throw SparkException.internalError(
+          s"Found unused message parameters of the error class '$errorClass'. " +
+          s"Its error message format has $placeHoldersNum placeholders, " +
+          s"but the passed message parameters map has ${sanitizedParameters.size} items. " +
+          "Consider to add placeholders to the error format or remove unused message parameters.")
+      }
+    }
+    errorMessage
+  }
+
+  def getMessageParameters(errorClass: String): Seq[String] = {
+    val messageTemplate = getMessageTemplate(errorClass)
+    val matches = ErrorClassesJsonReader.TEMPLATE_REGEX.findAllIn(messageTemplate).toSeq
+    matches.map(m => m.stripSuffix(">").stripPrefix("<"))
   }
 
   def getMessageTemplate(errorClass: String): String = {
@@ -85,9 +107,22 @@ class ErrorClassesJsonReader(jsonFileURLs: Seq[URL]) {
       .flatMap(_.sqlState)
       .orNull
   }
+
+  def isValidErrorClass(errorClass: String): Boolean = {
+    val errorClasses = errorClass.split("\\.")
+    errorClasses match {
+      case Array(mainClass) => errorInfoMap.contains(mainClass)
+      case Array(mainClass, subClass) => errorInfoMap.get(mainClass).exists { info =>
+        info.subClass.get.contains(subClass)
+      }
+      case _ => false
+    }
+  }
 }
 
 private object ErrorClassesJsonReader {
+  private val TEMPLATE_REGEX = "<([a-zA-Z0-9_-]+)>".r
+
   private val mapper: JsonMapper = JsonMapper.builder()
     .addModule(DefaultScalaModule)
     .build()
@@ -112,7 +147,7 @@ private object ErrorClassesJsonReader {
  *
  * @param sqlState SQLSTATE associated with this class.
  * @param subClass SubClass associated with this class.
- * @param message C-style message format compatible with printf.
+ * @param message Message format with optional placeholders (e.g. &lt;parm&gt;).
  *                The error message is constructed by concatenating the lines with newlines.
  */
 private case class ErrorInfo(
@@ -127,7 +162,7 @@ private case class ErrorInfo(
 /**
  * Information associated with an error subclass.
  *
- * @param message C-style message format compatible with printf.
+ * @param message Message format with optional placeholders (e.g. &lt;parm&gt;).
  *                The error message is constructed by concatenating the lines with newlines.
  */
 private case class ErrorSubInfo(message: Seq[String]) {
@@ -135,3 +170,17 @@ private case class ErrorSubInfo(message: Seq[String]) {
   @JsonIgnore
   val messageTemplate: String = message.mkString("\n")
 }
+
+/**
+ * Information associated with an error state / SQLSTATE.
+ *
+ * @param description What the error state means.
+ * @param origin The DBMS where this error state was first defined.
+ * @param standard Whether this error state is part of the SQL standard.
+ * @param usedBy What database systems use this error state.
+ */
+private case class ErrorStateInfo(
+    description: String,
+    origin: String,
+    standard: String,
+    usedBy: List[String])

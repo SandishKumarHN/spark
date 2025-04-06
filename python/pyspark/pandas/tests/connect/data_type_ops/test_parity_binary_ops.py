@@ -17,33 +17,18 @@
 import unittest
 
 from pyspark.pandas.tests.data_type_ops.test_binary_ops import BinaryOpsTestsMixin
-from pyspark.pandas.tests.connect.data_type_ops.testing_utils import OpsTestBase
+from pyspark.pandas.tests.data_type_ops.testing_utils import OpsTestBase
 from pyspark.testing.pandasutils import PandasOnSparkTestUtils
 from pyspark.testing.connectutils import ReusedConnectTestCase
 
 
 class BinaryOpsParityTests(
-    BinaryOpsTestsMixin, PandasOnSparkTestUtils, OpsTestBase, ReusedConnectTestCase
+    BinaryOpsTestsMixin,
+    PandasOnSparkTestUtils,
+    OpsTestBase,
+    ReusedConnectTestCase,
 ):
-    @unittest.skip("Fails in Spark Connect, should enable.")
-    def test_astype(self):
-        super().test_astype()
-
-    @unittest.skip("Fails in Spark Connect, should enable.")
-    def test_ge(self):
-        super().test_ge()
-
-    @unittest.skip("Fails in Spark Connect, should enable.")
-    def test_gt(self):
-        super().test_gt()
-
-    @unittest.skip("Fails in Spark Connect, should enable.")
-    def test_le(self):
-        super().test_le()
-
-    @unittest.skip("Fails in Spark Connect, should enable.")
-    def test_lt(self):
-        super().test_lt()
+    pass
 
 
 if __name__ == "__main__":

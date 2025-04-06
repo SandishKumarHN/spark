@@ -18,14 +18,19 @@
 package org.apache.spark.sql.connector.catalog
 
 import java.util
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{NamespaceAlreadyExistsException, NonEmptyNamespaceException, NoSuchNamespaceException, NoSuchTableException, TableAlreadyExistsException}
+import org.apache.spark.sql.connector.catalog.procedures.{BoundProcedure, ProcedureParameter, UnboundProcedure}
 import org.apache.spark.sql.connector.distributions.{Distribution, Distributions}
 import org.apache.spark.sql.connector.expressions.{SortOrder, Transform}
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.connector.read.{LocalScan, Scan}
+import org.apache.spark.sql.types.{DataTypes, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 class BasicInMemoryTableCatalog extends TableCatalog {
@@ -84,28 +89,18 @@ class BasicInMemoryTableCatalog extends TableCatalog {
     invalidatedTables.add(ident)
   }
 
-  // TODO: remove it when no tests calling this deprecated method.
-  override def createTable(
-      ident: Identifier,
-      schema: StructType,
-      partitions: Array[Transform],
-      properties: util.Map[String, String]): Table = {
-    createTable(ident, schema, partitions, properties, Distributions.unspecified(),
-      Array.empty, None, None)
-  }
-
   override def createTable(
       ident: Identifier,
       columns: Array[Column],
       partitions: Array[Transform],
       properties: util.Map[String, String]): Table = {
-    val schema = CatalogV2Util.v2ColumnsToStructType(columns)
-    createTable(ident, schema, partitions, properties)
+    createTable(ident, columns, partitions, properties, Distributions.unspecified(),
+      Array.empty, None, None)
   }
 
   def createTable(
       ident: Identifier,
-      schema: StructType,
+      columns: Array[Column],
       partitions: Array[Transform],
       properties: util.Map[String, String],
       distribution: Distribution,
@@ -114,6 +109,7 @@ class BasicInMemoryTableCatalog extends TableCatalog {
       advisoryPartitionSize: Option[Long],
       distributionStrictlyRequired: Boolean = true,
       numRowsPerSplit: Int = Int.MaxValue): Table = {
+    val schema = CatalogV2Util.v2ColumnsToStructType(columns)
     if (tables.containsKey(ident)) {
       throw new TableAlreadyExistsException(ident.asMultipartIdentifier)
     }
@@ -132,14 +128,19 @@ class BasicInMemoryTableCatalog extends TableCatalog {
   override def alterTable(ident: Identifier, changes: TableChange*): Table = {
     val table = loadTable(ident).asInstanceOf[InMemoryTable]
     val properties = CatalogV2Util.applyPropertiesChanges(table.properties, changes)
-    val schema = CatalogV2Util.applySchemaChanges(table.schema, changes, None, "ALTER TABLE")
+    val schema = CatalogV2Util.applySchemaChanges(
+      table.schema,
+      changes,
+      tableProvider = Some("in-memory"),
+      statementType = "ALTER TABLE")
+    val finalPartitioning = CatalogV2Util.applyClusterByChanges(table.partitioning, schema, changes)
 
     // fail if the last column in the schema was dropped
     if (schema.fields.isEmpty) {
       throw new IllegalArgumentException(s"Cannot drop all fields")
     }
 
-    val newTable = new InMemoryTable(table.name, schema, table.partitioning, properties)
+    val newTable = new InMemoryTable(table.name, schema, finalPartitioning, properties)
       .withData(table.data)
 
     tables.put(ident, newTable)
@@ -171,17 +172,28 @@ class BasicInMemoryTableCatalog extends TableCatalog {
   }
 }
 
-class InMemoryTableCatalog extends BasicInMemoryTableCatalog with SupportsNamespaces {
+class InMemoryTableCatalog extends BasicInMemoryTableCatalog with SupportsNamespaces
+  with ProcedureCatalog {
 
   override def capabilities: java.util.Set[TableCatalogCapability] = {
     Set(
       TableCatalogCapability.SUPPORT_COLUMN_DEFAULT_VALUE,
-      TableCatalogCapability.SUPPORTS_CREATE_TABLE_WITH_GENERATED_COLUMNS
+      TableCatalogCapability.SUPPORTS_CREATE_TABLE_WITH_GENERATED_COLUMNS,
+      TableCatalogCapability.SUPPORTS_CREATE_TABLE_WITH_IDENTITY_COLUMNS
     ).asJava
   }
 
+  protected val procedures: util.Map[Identifier, UnboundProcedure] =
+    new util.HashMap[Identifier, UnboundProcedure]
+  procedures.put(Identifier.of(Array("dummy"), "increment"), UnboundIncrement)
+
   protected def allNamespaces: Seq[Seq[String]] = {
-    (tables.keySet.asScala.map(_.namespace.toSeq) ++ namespaces.keySet.asScala).toSeq.distinct
+    (tables.keySet.asScala.map(_.namespace.toSeq)
+      ++ namespaces.keySet.asScala
+      ++ procedures.keySet.asScala
+      .filter(i => !i.namespace.sameElements(Array("dummy")))
+      .map(_.namespace.toSeq)
+      ).toSeq.distinct
   }
 
   override def namespaceExists(namespace: Array[String]): Boolean = {
@@ -209,7 +221,7 @@ class InMemoryTableCatalog extends BasicInMemoryTableCatalog with SupportsNamesp
       case _ if namespaceExists(namespace) =>
         util.Collections.emptyMap[String, String]
       case _ =>
-        throw new NoSuchNamespaceException(namespace)
+        throw new NoSuchNamespaceException(name() +: namespace)
     }
   }
 
@@ -255,9 +267,53 @@ class InMemoryTableCatalog extends BasicInMemoryTableCatalog with SupportsNamesp
     if (namespace.isEmpty || namespaceExists(namespace)) {
       super.listTables(namespace)
     } else {
-      throw new NoSuchNamespaceException(namespace)
+      throw new NoSuchNamespaceException(name() +: namespace)
     }
   }
+
+  override def loadProcedure(ident: Identifier): UnboundProcedure = {
+    val procedure = procedures.get(ident)
+    if (procedure == null) throw new RuntimeException("Procedure not found: " + ident)
+    procedure
+  }
+
+  override def listProcedures(namespace: Array[String]): Array[Identifier] = {
+    val result =
+      if (namespaceExists(namespace)) {
+        procedures.keySet.asScala
+          .filter(_.namespace.sameElements(namespace))
+      } else {
+        throw new NoSuchNamespaceException(namespace)
+      }
+    result.filter(!_.namespace.sameElements(Array("dummy"))).toArray
+  }
+
+  object UnboundIncrement extends UnboundProcedure {
+    override def name: String = "dummy_increment"
+    override def description: String = "test method to increment an in-memory counter"
+    override def bind(inputType: StructType): BoundProcedure = BoundIncrement
+  }
+
+  object BoundIncrement extends BoundProcedure {
+    private val value = new AtomicInteger(0)
+
+    override def name: String = "dummy_increment"
+
+    override def description: String = "test method to increment an in-memory counter"
+
+    override def isDeterministic: Boolean = false
+
+    override def parameters: Array[ProcedureParameter] = Array()
+
+    def outputType: StructType = new StructType().add("out", DataTypes.IntegerType)
+
+    override def call(input: InternalRow): java.util.Iterator[Scan] = {
+      val result = Result(outputType, Array(InternalRow(value.incrementAndGet().intValue)))
+      Collections.singleton[Scan](result).iterator()
+    }
+  }
+
+  case class Result(readSchema: StructType, rows: Array[InternalRow]) extends LocalScan
 }
 
 object InMemoryTableCatalog {

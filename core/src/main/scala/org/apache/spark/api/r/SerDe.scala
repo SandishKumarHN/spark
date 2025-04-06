@@ -293,9 +293,9 @@ private[spark] object SerDe {
     } else {
       // Convert ArrayType collected from DataFrame to Java array
       // Collected data of ArrayType from a DataFrame is observed to be of
-      // type "scala.collection.mutable.WrappedArray"
+      // type "scala.collection.mutable.ArraySeq"
       val value = obj match {
-        case wa: mutable.WrappedArray[_] => wa.array
+        case wa: mutable.ArraySeq[_] => wa.array
         case other => other
       }
 
@@ -389,7 +389,7 @@ private[spark] object SerDe {
           writeType(dos, "map")
           writeInt(dos, v.size)
           val iter = v.entrySet.iterator
-          while(iter.hasNext) {
+          while (iter.hasNext) {
             val entry = iter.next
             val key = entry.getKey
             val value = entry.getValue

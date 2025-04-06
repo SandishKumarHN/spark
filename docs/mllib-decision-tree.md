@@ -51,26 +51,26 @@ The *node impurity* is a measure of the homogeneity of the labels at the node. T
 implementation provides two impurity measures for classification (Gini impurity and entropy) and one
 impurity measure for regression (variance).
 
-<table class="table table-striped">
+<table>
   <thead>
     <tr><th>Impurity</th><th>Task</th><th>Formula</th><th>Description</th></tr>
   </thead>
   <tbody>
     <tr>
       <td>Gini impurity</td>
-	  <td>Classification</td>
-	  <td>$\sum_{i=1}^{C} f_i(1-f_i)$</td><td>$f_i$ is the frequency of label $i$ at a node and $C$ is the number of unique labels.</td>
+      <td>Classification</td>
+      <td>$\sum_{i=1}^{C} f_i(1-f_i)$</td><td>$f_i$ is the frequency of label $i$ at a node and $C$ is the number of unique labels.</td>
     </tr>
     <tr>
       <td>Entropy</td>
-	  <td>Classification</td>
-	  <td>$\sum_{i=1}^{C} -f_ilog(f_i)$</td><td>$f_i$ is the frequency of label $i$ at a node and $C$ is the number of unique labels.</td>
+      <td>Classification</td>
+      <td>$\sum_{i=1}^{C} -f_ilog(f_i)$</td><td>$f_i$ is the frequency of label $i$ at a node and $C$ is the number of unique labels.</td>
     </tr>
     <tr>
       <td>Variance</td>
-	  <td>Regression</td>
-     <td>$\frac{1}{N} \sum_{i=1}^{N} (y_i - \mu)^2$</td><td>$y_i$ is label for an instance,
-	  $N$ is the number of instances and $\mu$ is the mean given by $\frac{1}{N} \sum_{i=1}^N y_i$.</td>
+      <td>Regression</td>
+      <td>$\frac{1}{N} \sum_{i=1}^{N} (y_i - \mu)^2$</td><td>$y_i$ is label for an instance,
+      $N$ is the number of instances and $\mu$ is the mean given by $\frac{1}{N} \sum_{i=1}^N y_i$.</td>
     </tr>
   </tbody>
 </table>

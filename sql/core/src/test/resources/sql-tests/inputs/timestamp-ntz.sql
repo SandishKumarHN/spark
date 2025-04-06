@@ -1,6 +1,6 @@
 -- timestamp_ntz literals and constructors
 --CONFIG_DIM1 spark.sql.timestampType=TIMESTAMP_LTZ
---CONFIG_DIM1 spark.sql.timestampType=TIMESTAMP_NTZ
+--CONFIG_DIM2 spark.sql.timestampType=TIMESTAMP_NTZ
 
 select timestamp_ntz'2016-12-31 00:12:00', timestamp_ntz'2016-12-31';
 
@@ -31,3 +31,9 @@ select timestamp_ntz'2022-01-01 00:00:00' < date'2022-01-01';
 select timestamp_ntz'2022-01-01 00:00:00' = timestamp_ltz'2022-01-01 00:00:00';
 select timestamp_ntz'2022-01-01 00:00:00' > timestamp_ltz'2022-01-01 00:00:00';
 select timestamp_ntz'2022-01-01 00:00:00' < timestamp_ltz'2022-01-01 00:00:00';
+
+CREATE TABLE a (a timestamp_ntz, b int) using parquet PARTITIONED BY(a);
+INSERT INTO a PARTITION(a=timestamp_ntz'2018-11-17 13:33:33') VALUES (1);
+DESC FORMATTED a;
+SELECT * FROM a;
+DROP TABLE a;

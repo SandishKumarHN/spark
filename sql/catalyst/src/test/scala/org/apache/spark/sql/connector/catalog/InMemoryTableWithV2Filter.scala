@@ -27,6 +27,7 @@ import org.apache.spark.sql.connector.read.{InputPartition, Scan, ScanBuilder, S
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, SupportsOverwriteV2, WriteBuilder, WriterCommitMessage}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.util.ArrayImplicits._
 
 class InMemoryTableWithV2Filter(
     name: String,
@@ -42,23 +43,26 @@ class InMemoryTableWithV2Filter(
   override def deleteWhere(filters: Array[Predicate]): Unit = dataMap.synchronized {
     import org.apache.spark.sql.connector.catalog.CatalogV2Implicits.MultipartIdentifierHelper
     dataMap --= InMemoryTableWithV2Filter
-      .filtersToKeys(dataMap.keys, partCols.map(_.toSeq.quoted), filters)
+      .filtersToKeys(dataMap.keys, partCols.map(_.toSeq.quoted).toImmutableArraySeq, filters)
   }
 
   override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
-    new InMemoryV2FilterScanBuilder(schema)
+    new InMemoryV2FilterScanBuilder(schema, options)
   }
 
-  class InMemoryV2FilterScanBuilder(tableSchema: StructType)
-    extends InMemoryScanBuilder(tableSchema) {
-    override def build: Scan =
-      InMemoryV2FilterBatchScan(data.map(_.asInstanceOf[InputPartition]), schema, tableSchema)
+  class InMemoryV2FilterScanBuilder(
+     tableSchema: StructType,
+     options: CaseInsensitiveStringMap)
+    extends InMemoryScanBuilder(tableSchema, options) {
+    override def build: Scan = InMemoryV2FilterBatchScan(
+      data.map(_.asInstanceOf[InputPartition]).toImmutableArraySeq, schema, tableSchema, options)
   }
 
   case class InMemoryV2FilterBatchScan(
       var _data: Seq[InputPartition],
       readSchema: StructType,
-      tableSchema: StructType)
+      tableSchema: StructType,
+      options: CaseInsensitiveStringMap)
     extends BatchScanBaseClass(_data, readSchema, tableSchema) with SupportsRuntimeV2Filtering {
 
     override def filterAttributes(): Array[NamedReference] = {
@@ -78,7 +82,7 @@ class InMemoryTableWithV2Filter(
                 val matchingKeys =
                   p.children().drop(1).map(_.asInstanceOf[LiteralValue[_]].value.toString).toSet
                 data = data.filter(partition => {
-                  val key = partition.asInstanceOf[BufferedRows].keyString
+                  val key = partition.asInstanceOf[BufferedRows].keyString()
                   matchingKeys.contains(key)
                 })
               }
@@ -92,21 +96,21 @@ class InMemoryTableWithV2Filter(
     InMemoryBaseTable.maybeSimulateFailedTableWrite(new CaseInsensitiveStringMap(properties))
     InMemoryBaseTable.maybeSimulateFailedTableWrite(info.options)
 
-    new InMemoryWriterBuilderWithOverWrite()
+    new InMemoryWriterBuilderWithOverWrite(info)
   }
 
-  private class InMemoryWriterBuilderWithOverWrite() extends InMemoryWriterBuilder
-    with SupportsOverwriteV2 {
+  class InMemoryWriterBuilderWithOverWrite(override val info: LogicalWriteInfo)
+    extends InMemoryWriterBuilder(info) with SupportsOverwriteV2 {
 
     override def truncate(): WriteBuilder = {
-      assert(writer == Append)
-      writer = TruncateAndAppend
-      streamingWriter = StreamingTruncateAndAppend
+      assert(writer.isInstanceOf[Append])
+      writer = new TruncateAndAppend(info)
+      streamingWriter = new StreamingTruncateAndAppend(info)
       this
     }
 
     override def overwrite(predicates: Array[Predicate]): WriteBuilder = {
-      assert(writer == Append)
+      assert(writer.isInstanceOf[Append])
       writer = new Overwrite(predicates)
       streamingWriter = new StreamingNotSupportedOperation(
         s"overwrite (${predicates.mkString("filters(", ", ", ")")})")
@@ -122,7 +126,7 @@ class InMemoryTableWithV2Filter(
     import org.apache.spark.sql.connector.catalog.CatalogV2Implicits.MultipartIdentifierHelper
     override def commit(messages: Array[WriterCommitMessage]): Unit = dataMap.synchronized {
       val deleteKeys = InMemoryTableWithV2Filter.filtersToKeys(
-        dataMap.keys, partCols.map(_.toSeq.quoted), predicates)
+        dataMap.keys, partCols.map(_.toSeq.quoted).toImmutableArraySeq, predicates)
       dataMap --= deleteKeys
       withData(messages.map(_.asInstanceOf[BufferedRows]))
     }

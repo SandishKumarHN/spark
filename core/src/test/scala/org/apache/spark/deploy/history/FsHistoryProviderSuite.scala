@@ -29,6 +29,7 @@ import com.google.common.io.{ByteStreams, Files}
 import org.apache.commons.io.FileUtils
 import org.apache.hadoop.fs.{FileStatus, FileSystem, FSDataInputStream, Path}
 import org.apache.hadoop.hdfs.{DFSInputStream, DistributedFileSystem}
+import org.apache.hadoop.ipc.{CallerContext => HadoopCallerContext}
 import org.apache.hadoop.security.AccessControlException
 import org.mockito.ArgumentMatchers.{any, argThat}
 import org.mockito.Mockito.{doThrow, mock, spy, verify, when}
@@ -126,8 +127,9 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
 
     // Write a new-style application log.
     val newAppCompressedComplete = newLogFile("new1compressed", None, inProgress = false,
-      Some("lzf"))
-    writeFile(newAppCompressedComplete, Some(CompressionCodec.createCodec(conf, "lzf")),
+      Some(CompressionCodec.LZF))
+    writeFile(
+      newAppCompressedComplete, Some(CompressionCodec.createCodec(conf, CompressionCodec.LZF)),
       SparkListenerApplicationStart(newAppCompressedComplete.getName(), Some("new-complete-lzf"),
         1L, "test", None),
       SparkListenerApplicationEnd(4L))
@@ -245,7 +247,7 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
       val fs = new Path(dir.getAbsolutePath).getFileSystem(hadoopConf)
       val provider = new FsHistoryProvider(conf)
 
-      val mergeApplicationListing = PrivateMethod[Unit]('mergeApplicationListing)
+      val mergeApplicationListing = PrivateMethod[Unit](Symbol("mergeApplicationListing"))
 
       val inProgressFile = newLogFile("app1", None, inProgress = true)
       val logAppender1 = new LogAppender("in-progress and final event log files does not exist")
@@ -707,7 +709,8 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
       while (entry != null) {
         val actual = new String(ByteStreams.toByteArray(inputStream), StandardCharsets.UTF_8)
         val expected =
-          Files.toString(logs.find(_.getName == entry.getName).get, StandardCharsets.UTF_8)
+          Files.asCharSource(logs.find(_.getName == entry.getName).get, StandardCharsets.UTF_8)
+            .read()
         actual should be (expected)
         totalEntries += 1
         entry = inputStream.getNextEntry
@@ -788,7 +791,7 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
   }
 
   test("provider correctly checks whether fs is in safe mode") {
-    val provider = spy(new FsHistoryProvider(createTestConf()))
+    val provider = spy[FsHistoryProvider](new FsHistoryProvider(createTestConf()))
     val dfs = mock(classOf[DistributedFileSystem])
     // Asserts that safe mode is false because we can't really control the return value of the mock,
     // since the API is different between hadoop 1 and 2.
@@ -1032,7 +1035,7 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
     withTempDir { storeDir =>
       val conf = createTestConf().set(LOCAL_STORE_DIR, storeDir.getAbsolutePath())
       val clock = new ManualClock()
-      val provider = spy(new FsHistoryProvider(conf, clock))
+      val provider = spy[FsHistoryProvider](new FsHistoryProvider(conf, clock))
       val appId = "new1"
 
       // Write logs for two app attempts.
@@ -1112,13 +1115,13 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
 
     provider.checkForLogs()
     provider.cleanLogs()
-    assert(new File(testDir.toURI).listFiles().size === logCount)
+    assert(new File(testDir.toURI).listFiles().length === logCount)
 
     // Move the clock forward 1 day and scan the files again. They should still be there.
     clock.advance(TimeUnit.DAYS.toMillis(1))
     provider.checkForLogs()
     provider.cleanLogs()
-    assert(new File(testDir.toURI).listFiles().size === logCount)
+    assert(new File(testDir.toURI).listFiles().length === logCount)
 
     // Update the slow app to contain valid info. Code should detect the change and not clean
     // it up.
@@ -1132,7 +1135,7 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
     clock.advance(TimeUnit.DAYS.toMillis(2))
     provider.checkForLogs()
     provider.cleanLogs()
-    assert(new File(testDir.toURI).listFiles().size === validLogCount)
+    assert(new File(testDir.toURI).listFiles().length === validLogCount)
   }
 
   test("always find end event for finished apps") {
@@ -1196,11 +1199,11 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
       SparkListenerApplicationStart("accessGranted", Some("accessGranted"), 1L, "test", None),
       SparkListenerApplicationEnd(5L))
     var isReadable = false
-    val mockedFs = spy(provider.fs)
+    val mockedFs = spy[FileSystem](provider.fs)
     doThrow(new AccessControlException("Cannot read accessDenied file")).when(mockedFs).open(
       argThat((path: Path) => path.getName.toLowerCase(Locale.ROOT) == "accessdenied" &&
         !isReadable))
-    val mockedProvider = spy(provider)
+    val mockedProvider = spy[FsHistoryProvider](provider)
     when(mockedProvider.fs).thenReturn(mockedFs)
     updateAndCheck(mockedProvider) { list =>
       list.size should be(1)
@@ -1225,7 +1228,7 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
   test("check in-progress event logs absolute length") {
     val path = new Path("testapp.inprogress")
     val provider = new FsHistoryProvider(createTestConf())
-    val mockedProvider = spy(provider)
+    val mockedProvider = spy[FsHistoryProvider](provider)
     val mockedFs = mock(classOf[FileSystem])
     val in = mock(classOf[FSDataInputStream])
     val dfsIn = mock(classOf[DFSInputStream])
@@ -1413,12 +1416,12 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
 
     provider.checkForLogs()
     // The invalid application log file would be cleaned by checkAndCleanLog().
-    assert(new File(testDir.toURI).listFiles().size === 1)
+    assert(new File(testDir.toURI).listFiles().length === 1)
 
     clock.advance(1)
     // cleanLogs() would clean the valid application log file.
     provider.cleanLogs()
-    assert(new File(testDir.toURI).listFiles().size === 0)
+    assert(new File(testDir.toURI).listFiles().length === 0)
   }
 
   private def assertOptionAfterSerde(opt: Option[Long], expected: Option[Long]): Unit = {
@@ -1555,8 +1558,8 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
         SparkListenerJobStart(1, 0, Seq.empty)), rollFile = false)
       provider.checkForLogs()
       provider.cleanLogs()
-      assert(dir.listFiles().size === 1)
-      assert(provider.getListing.length === 1)
+      assert(dir.listFiles().length === 1)
+      assert(provider.getListing().length === 1)
 
       // Manually delete the appstatus file to make an invalid rolling event log
       val appStatusPath = RollingEventLogFilesWriter.getAppStatusFilePath(new Path(writer.logPath),
@@ -1564,7 +1567,7 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
       fs.delete(appStatusPath, false)
       provider.checkForLogs()
       provider.cleanLogs()
-      assert(provider.getListing.length === 0)
+      assert(provider.getListing().length === 0)
 
       // Create a new application
       val writer2 = new RollingEventLogFilesWriter("app2", None, dir.toURI, conf, hadoopConf)
@@ -1576,14 +1579,14 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
       // Both folders exist but only one application found
       provider.checkForLogs()
       provider.cleanLogs()
-      assert(provider.getListing.length === 1)
-      assert(dir.listFiles().size === 2)
+      assert(provider.getListing().length === 1)
+      assert(dir.listFiles().length === 2)
 
       // Make sure a new provider sees the valid application
       provider.stop()
       val newProvider = new FsHistoryProvider(conf)
       newProvider.checkForLogs()
-      assert(newProvider.getListing.length === 1)
+      assert(newProvider.getListing().length === 1)
     }
   }
 
@@ -1613,8 +1616,8 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
 
       // The 1st checkForLogs should scan/update app2 only since it is newer than app1
       provider.checkForLogs()
-      assert(provider.getListing.length === 1)
-      assert(dir.listFiles().size === 2)
+      assert(provider.getListing().length === 1)
+      assert(dir.listFiles().length === 2)
       assert(provider.getListing().map(e => e.id).contains("app2"))
       assert(!provider.getListing().map(e => e.id).contains("app1"))
 
@@ -1628,8 +1631,8 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
 
       // The 2nd checkForLogs should scan/update app3 only since it is newer than app1
       provider.checkForLogs()
-      assert(provider.getListing.length === 2)
-      assert(dir.listFiles().size === 3)
+      assert(provider.getListing().length === 2)
+      assert(dir.listFiles().length === 3)
       assert(provider.getListing().map(e => e.id).contains("app3"))
       assert(!provider.getListing().map(e => e.id).contains("app1"))
 
@@ -1654,8 +1657,8 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
         SparkListenerJobStart(1, 0, Seq.empty)), rollFile = false)
       provider.checkForLogs()
       provider.cleanLogs()
-      assert(dir.listFiles().size === 1)
-      assert(provider.getListing.length === 1)
+      assert(dir.listFiles().length === 1)
+      assert(provider.getListing().length === 1)
 
       // Manually delete event log files and create event log file reader
       val eventLogDir = dir.listFiles().head
@@ -1772,6 +1775,18 @@ abstract class FsHistoryProviderSuite extends SparkFunSuite with Matchers with P
     assert(!log1.exists())
     assert(!log3.exists())
     assert(log2.exists())
+  }
+
+  test("SPARK-51136: FsHistoryProvider start should set Hadoop CallerContext") {
+    val provider = new FsHistoryProvider(createTestConf())
+    provider.start()
+
+    try {
+      val hadoopCallerContext = HadoopCallerContext.getCurrent()
+      assert(hadoopCallerContext.getContext() === "SPARK_HISTORY")
+    } finally {
+      provider.stop()
+    }
   }
 
   /**

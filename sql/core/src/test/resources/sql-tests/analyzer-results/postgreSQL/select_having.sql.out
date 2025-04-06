@@ -115,8 +115,8 @@ SELECT c, max(a) FROM test_having
 -- !query analysis
 Sort [c#x ASC NULLS FIRST], true
 +- Project [c#x, max(a)#x]
-   +- Filter ((count(1)#xL > cast(2 as bigint)) OR (min(a#x)#x = max(a)#x))
-      +- Aggregate [c#x], [c#x, max(a#x) AS max(a)#x, count(1) AS count(1)#xL, min(a#x) AS min(a#x)#x]
+   +- Filter ((count(1)#xL > cast(2 as bigint)) OR (min(a)#x = max(a)#x))
+      +- Aggregate [c#x], [c#x, max(a#x) AS max(a)#x, count(1) AS count(1)#xL, min(a#x) AS min(a)#x]
          +- SubqueryAlias spark_catalog.default.test_having
             +- Relation spark_catalog.default.test_having[a#x,b#x,c#x,d#x] parquet
 
@@ -142,7 +142,7 @@ Filter (min(a)#x < max(a)#x)
 -- !query
 SELECT a FROM test_having HAVING min(a) < max(a)
 -- !query analysis
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "MISSING_GROUP_BY",
   "sqlState" : "42803",
@@ -159,7 +159,7 @@ org.apache.spark.sql.AnalysisException
 -- !query
 SELECT 1 AS one FROM test_having HAVING a > 1
 -- !query analysis
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "UNRESOLVED_COLUMN.WITH_SUGGESTION",
   "sqlState" : "42703",
@@ -208,4 +208,5 @@ Filter (one#x < 2)
 -- !query
 DROP TABLE test_having
 -- !query analysis
-DropTableCommand `spark_catalog`.`default`.`test_having`, false, false, false
+DropTable false, false
++- ResolvedIdentifier V2SessionCatalog(spark_catalog), default.test_having

@@ -18,7 +18,7 @@
 import contextlib
 import os
 import shutil
-from six import StringIO
+from io import StringIO
 import stat
 import subprocess
 import sys
@@ -29,17 +29,12 @@ from typing import Callable, Dict, Any
 import unittest
 from unittest.mock import patch
 
-have_torch = True
-try:
-    import torch  # noqa: F401
-except ImportError:
-    have_torch = False
-
 from pyspark import SparkConf, SparkContext
 from pyspark.ml.torch.distributor import TorchDistributor, _get_gpus_owned
 from pyspark.ml.torch.torch_run_process_wrapper import clean_and_terminate, check_parent_alive
 from pyspark.sql import SparkSession
-from pyspark.testing.utils import SPARK_HOME
+from pyspark.testing.sqlutils import SPARK_HOME
+from pyspark.testing.utils import have_torch, torch_requirement_message
 
 
 @contextlib.contextmanager
@@ -312,7 +307,7 @@ class TorchDistributorBaselineUnitTestsMixin:
         self.delete_env_vars(input_env_vars)
 
 
-@unittest.skipIf(not have_torch, "torch is required")
+@unittest.skipIf(not have_torch, torch_requirement_message)
 class TorchDistributorBaselineUnitTests(TorchDistributorBaselineUnitTestsMixin, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -361,8 +356,7 @@ class TorchDistributorLocalUnitTestsMixin:
 
     def _get_inputs_for_test_local_training_succeeds(self):
         return [
-            ("0,1,2", 1, True, "1"),
-            ("0,1,2", 3, True, "1,2,0"),
+            ("0,1,2", 3, True, "0,1,2"),
             ("0,1,2", 2, False, "0,1,2"),
             (None, 3, False, "NONE"),
         ]
@@ -381,9 +375,12 @@ class TorchDistributorLocalUnitTestsMixin:
                 dist._run_training_on_pytorch_file = lambda *args: os.environ.get(
                     CUDA_VISIBLE_DEVICES, "NONE"
                 )
+                output = dist._run_local_training(
+                    dist._run_training_on_pytorch_file, "train.py", None
+                )
                 self.assertEqual(
-                    expected,
-                    dist._run_local_training(dist._run_training_on_pytorch_file, "train.py"),
+                    sorted(expected.split(",")),
+                    sorted(output.split(",")),
                 )
                 # cleanup
                 if cuda_env_var:
@@ -396,6 +393,9 @@ class TorchDistributorLocalUnitTestsMixin:
             test_file_path, learning_rate_str
         )
 
+    @unittest.skipIf(
+        sys.version_info > (3, 12), "SPARK-46078: Fails with dev torch with Python 3.12"
+    )
     def test_end_to_end_run_locally(self) -> None:
         train_fn = create_training_function(self.mnist_dir_path)
         output = TorchDistributor(num_processes=2, local_mode=True, use_gpu=False).run(
@@ -404,7 +404,9 @@ class TorchDistributorLocalUnitTestsMixin:
         self.assertEqual(output, "success" * 4096)
 
 
-@unittest.skipIf(not have_torch, "torch is required")
+# @unittest.skipIf(not have_torch, torch_requirement_message)
+# TODO(SPARK-50864): Re-enable this test after fixing the slowness
+@unittest.skip("Disabled due to slowness")
 class TorchDistributorLocalUnitTests(TorchDistributorLocalUnitTestsMixin, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -426,7 +428,9 @@ class TorchDistributorLocalUnitTests(TorchDistributorLocalUnitTestsMixin, unitte
         cls.spark.stop()
 
 
-@unittest.skipIf(not have_torch, "torch is required")
+# @unittest.skipIf(not have_torch, torch_requirement_message)
+# TODO(SPARK-50864): Re-enable this test after fixing the slowness
+@unittest.skip("Disabled due to slowness")
 class TorchDistributorLocalUnitTestsII(TorchDistributorLocalUnitTestsMixin, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -463,7 +467,12 @@ class TorchDistributorDistributedUnitTestsMixin:
                 )
                 self.assertEqual(
                     expected,
-                    dist._run_distributed_training(dist._run_training_on_pytorch_file, "..."),
+                    dist._run_distributed_training(
+                        dist._run_training_on_pytorch_file,
+                        "...",
+                        TorchDistributor._run_training_on_pytorch_file,
+                        None,
+                    ),
                 )
 
     def test_get_num_tasks_distributed(self) -> None:
@@ -492,7 +501,9 @@ class TorchDistributorDistributedUnitTestsMixin:
         self.assertEqual(output, "success" * 4096)
 
 
-@unittest.skipIf(not have_torch, "torch is required")
+# @unittest.skipIf(not have_torch, torch_requirement_message)
+# TODO(SPARK-50864): Re-enable this test after fixing the slowness
+@unittest.skip("Disabled due to slowness")
 class TorchDistributorDistributedUnitTests(
     TorchDistributorDistributedUnitTestsMixin, unittest.TestCase
 ):
@@ -539,7 +550,7 @@ class TorchWrapperUnitTestsMixin:
         self.assertEqual(mock_clean_and_terminate.call_count, 0)
 
 
-@unittest.skipIf(not have_torch, "torch is required")
+@unittest.skipIf(not have_torch, torch_requirement_message)
 class TorchWrapperUnitTests(TorchWrapperUnitTestsMixin, unittest.TestCase):
     pass
 

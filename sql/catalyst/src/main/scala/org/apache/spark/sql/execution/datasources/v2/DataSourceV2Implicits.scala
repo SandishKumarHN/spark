@@ -17,10 +17,11 @@
 
 package org.apache.spark.sql.execution.datasources.v2
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.catalyst.analysis.{PartitionSpec, ResolvedPartitionSpec, UnresolvedPartitionSpec}
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, MetadataAttribute}
+import org.apache.spark.sql.catalyst.types.DataTypeUtils
 import org.apache.spark.sql.connector.catalog.{MetadataColumn, SupportsAtomicPartitionManagement, SupportsDeleteV2, SupportsPartitionManagement, SupportsRead, SupportsWrite, Table, TableCapability, TruncatableTable}
 import org.apache.spark.sql.connector.write.RowLevelOperationTable
 import org.apache.spark.sql.errors.QueryCompilationErrors
@@ -64,6 +65,11 @@ object DataSourceV2Implicits {
       }
     }
 
+    def supportsPartitions: Boolean = table match {
+      case _: SupportsPartitionManagement => true
+      case _ => false
+    }
+
     def asPartitionable: SupportsPartitionManagement = {
       table match {
         case support: SupportsPartitionManagement =>
@@ -103,13 +109,13 @@ object DataSourceV2Implicits {
           name = metaCol.name,
           dataType = metaCol.dataType,
           nullable = metaCol.isNullable,
-          metadata = MetadataAttribute.metadata(metaCol.name))
+          metadata = MetadataAttribute.metadata(metaCol))
         Option(metaCol.comment).map(field.withComment).getOrElse(field)
       }
       StructType(fields)
     }
 
-    def toAttributes: Seq[AttributeReference] = asStruct.toAttributes
+    def toAttributes: Seq[AttributeReference] = DataTypeUtils.toAttributes(asStruct)
   }
 
   implicit class OptionsHelper(options: Map[String, String]) {

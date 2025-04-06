@@ -26,8 +26,10 @@ import org.apache.spark.sql.execution.streaming.{MemoryStream, StateStoreSaveExe
 import org.apache.spark.sql.execution.streaming.state.StateStore
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.tags.SlowSQLTest
 
 // Tests for the multiple stateful operators support.
+@SlowSQLTest
 class MultiStatefulOperatorsSuite
   extends StreamTest with StateStoreMetricsTest with BeforeAndAfter {
 
@@ -424,8 +426,8 @@ class MultiStatefulOperatorsSuite
     val stream = inputDF1.join(inputDF2,
       expr("v1 >= start2 AND v1 < end2 " +
         "AND eventTime1 = start2"), "inner")
-      .groupBy(window($"eventTime1", "5 seconds") as 'window)
-      .agg(count("*") as 'count)
+      .groupBy(window($"eventTime1", "5 seconds") as Symbol("window"))
+      .agg(count("*") as Symbol("count"))
       .select($"window".getField("start").cast("long").as[Long], $"count".as[Long])
 
     testStream(stream)(
@@ -834,12 +836,12 @@ class MultiStatefulOperatorsSuite
     }
 
     val input1 = MemoryStream[(String, Timestamp)]
-    val df1 = input1.toDF
+    val df1 = input1.toDF()
       .selectExpr("_1 as leftId", "_2 as leftEventTime")
       .withWatermark("leftEventTime", "5 minutes")
 
     val input2 = MemoryStream[(String, Timestamp)]
-    val df2 = input2.toDF
+    val df2 = input2.toDF()
       .selectExpr("_1 as rightId", "_2 as rightEventTime")
       .withWatermark("rightEventTime", "10 minutes")
 
@@ -876,11 +878,65 @@ class MultiStatefulOperatorsSuite
     testOutputWatermarkInJoin(join3, input1, -40L * 1000 - 1)
   }
 
+  test("SPARK-49829 time window agg per each source followed by stream-stream join") {
+    val inputStream1 = MemoryStream[Long]
+    val inputStream2 = MemoryStream[Long]
+
+    val df1 = inputStream1.toDF()
+      .selectExpr("value", "timestamp_seconds(value) AS ts")
+      .withWatermark("ts", "5 seconds")
+
+    val df2 = inputStream2.toDF()
+      .selectExpr("value", "timestamp_seconds(value) AS ts")
+      .withWatermark("ts", "5 seconds")
+
+    val df1Window = df1.groupBy(
+      window($"ts", "10 seconds")
+    ).agg(sum("value").as("sum_df1"))
+
+    val df2Window = df2.groupBy(
+      window($"ts", "10 seconds")
+    ).agg(sum("value").as("sum_df2"))
+
+    val joined = df1Window.join(df2Window, "window", "inner")
+      .selectExpr("CAST(window.end AS long) AS window_end", "sum_df1", "sum_df2")
+
+    // The test verifies the case where both sides produce input as time window (append mode)
+    // for stream-stream join having join condition for equality of time window.
+    // Inputs are produced into stream-stream join when the time windows are completed, meaning
+    // they will be evicted in this batch for stream-stream join as well. (NOTE: join condition
+    // does not delay the state watermark in stream-stream join).
+    // Before SPARK-49829, left side does not add the input to state store if it's going to evict
+    // in this batch, which breaks the match between input from left side and input from right
+    // side for this batch.
+    testStream(joined)(
+      MultiAddData(
+        (inputStream1, Seq(1L, 2L, 3L, 4L, 5L)),
+        (inputStream2, Seq(5L, 6L, 7L, 8L, 9L))
+      ),
+      // watermark: 5 - 5 = 0
+      CheckNewAnswer(),
+      MultiAddData(
+        (inputStream1, Seq(11L, 12L, 13L, 14L, 15L)),
+        (inputStream2, Seq(15L, 16L, 17L, 18L, 19L))
+      ),
+      // watermark: 15 - 5 = 10 (windows for [0, 10) are completed)
+      // Before SPARK-49829, the test fails because this row is not produced.
+      CheckNewAnswer((10L, 15L, 35L)),
+      MultiAddData(
+        (inputStream1, Seq(100L)),
+        (inputStream2, Seq(101L))
+      ),
+      // watermark: 100 - 5 = 95 (windows for [0, 20) are completed)
+      CheckNewAnswer((20L, 65L, 85L))
+    )
+  }
+
   private def assertNumStateRows(numTotalRows: Seq[Long]): AssertOnQuery = AssertOnQuery { q =>
     q.processAllAvailable()
     val progressWithData = q.recentProgress.lastOption.get
     val stateOperators = progressWithData.stateOperators
-    assert(stateOperators.size === numTotalRows.size)
+    assert(stateOperators.length === numTotalRows.size)
     assert(stateOperators.map(_.numRowsTotal).toSeq === numTotalRows)
     true
   }
@@ -895,7 +951,7 @@ class MultiStatefulOperatorsSuite
       p.numInputRows == 0
     }.lastOption.get
     val stateOperators = progressWithData.stateOperators
-    assert(stateOperators.size === numRowsDroppedByWatermark.size)
+    assert(stateOperators.length === numRowsDroppedByWatermark.size)
     assert(stateOperators.map(_.numRowsDroppedByWatermark).toSeq === numRowsDroppedByWatermark)
     true
   }

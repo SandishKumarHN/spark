@@ -21,12 +21,12 @@ import java.io.{Externalizable, ObjectInput, ObjectOutput}
 import java.lang.Thread.UncaughtExceptionHandler
 import java.net.URL
 import java.nio.ByteBuffer
-import java.util.Properties
+import java.util.{HashMap, Properties}
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.AtomicBoolean
 
 import scala.collection.immutable
-import scala.collection.mutable.{ArrayBuffer, Map}
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
 
 import com.google.common.cache.{CacheBuilder, CacheLoader}
@@ -522,7 +522,13 @@ class ExecutorSuite extends SparkFunSuite
       testThrowable(new OutOfMemoryError(), depthToCheck, isFatal = true)
       testThrowable(new InterruptedException(), depthToCheck, isFatal = false)
       testThrowable(new RuntimeException("test"), depthToCheck, isFatal = false)
-      testThrowable(new SparkOutOfMemoryError("test"), depthToCheck, isFatal = false)
+      testThrowable(
+        new SparkOutOfMemoryError(
+          "_LEGACY_ERROR_USER_RAISED_EXCEPTION",
+          new HashMap[String, String]() {
+            put("errorMessage", "test")
+          }),
+        depthToCheck, isFatal = false)
     }
 
     // Verify we can handle the cycle in the exception chain
@@ -548,9 +554,10 @@ class ExecutorSuite extends SparkFunSuite
       // and takes a long time to finish because file download is slow:
       val slowLibraryDownloadThread = new Thread(() => {
         executor.updateDependencies(
-          Map.empty,
-          Map.empty,
-          Map.empty,
+          immutable.Map.empty,
+          immutable.Map.empty,
+          immutable.Map.empty,
+          executor.defaultSessionState,
           Some(startLatch),
           Some(endLatch))
       })
@@ -563,9 +570,10 @@ class ExecutorSuite extends SparkFunSuite
       // dependency update:
       val blockedLibraryDownloadThread = new Thread(() => {
         executor.updateDependencies(
-          Map.empty,
-          Map.empty,
-          Map.empty)
+          immutable.Map.empty,
+          immutable.Map.empty,
+          immutable.Map.empty,
+          executor.defaultSessionState)
       })
       blockedLibraryDownloadThread.start()
       eventually(timeout(10.seconds), interval(100.millis)) {
@@ -621,6 +629,7 @@ class ExecutorSuite extends SparkFunSuite
       numPartitions = 1,
       locs = Seq(),
       outputId = 0,
+      JobArtifactSet.emptyJobArtifactSet,
       localProperties = new Properties(),
       serializedTaskMetrics = serializedTaskMetrics
     )
@@ -636,12 +645,10 @@ class ExecutorSuite extends SparkFunSuite
       name = "",
       index = 0,
       partitionId = 0,
-      addedFiles = Map[String, Long](),
-      addedJars = Map[String, Long](),
-      addedArchives = Map[String, Long](),
+      JobArtifactSet.emptyJobArtifactSet,
       properties = new Properties,
       cpus = 1,
-      resources = immutable.Map[String, ResourceInformation](),
+      resources = Map.empty,
       serializedTask)
   }
 

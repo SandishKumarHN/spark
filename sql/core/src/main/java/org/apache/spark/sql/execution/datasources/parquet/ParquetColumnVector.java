@@ -33,6 +33,8 @@ import org.apache.spark.sql.catalyst.types.DataTypeUtils;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.MapType;
 import org.apache.spark.sql.types.StructType;
+import org.apache.spark.sql.types.VariantType;
+import org.apache.spark.types.variant.VariantSchema;
 
 /**
  * Contains necessary information representing a Parquet column, either of primitive or nested type.
@@ -41,6 +43,14 @@ final class ParquetColumnVector {
   private final ParquetColumn column;
   private final List<ParquetColumnVector> children;
   private final WritableColumnVector vector;
+
+  // Describes the file schema of the Parquet variant column. When it is not null, `children`
+  // contains only one child that reads the underlying file content. This `ParquetColumnVector`
+  // should assemble Spark variant values from the file content.
+  private VariantSchema variantSchema;
+  // Only meaningful if `variantSchema` is not null. See `SparkShreddingUtils.getFieldsToExtract`
+  // for its meaning.
+  private FieldToExtract[] fieldsToExtract;
 
   /**
    * Repetition & Definition levels
@@ -91,7 +101,7 @@ final class ParquetColumnVector {
       // the appendObjects method. This delegates to some specific append* method depending on the
       // type of 'defaultValue'; for example, if 'defaultValue' is a Float, then we call the
       // appendFloats method.
-      if (!vector.appendObjects(capacity, defaultValue).isPresent()) {
+      if (vector.appendObjects(capacity, defaultValue).isEmpty()) {
         throw new IllegalArgumentException("Cannot assign default column value to result " +
           "column batch in vectorized Parquet reader because the data type is not supported: " +
           defaultValue);
@@ -100,7 +110,19 @@ final class ParquetColumnVector {
       }
     }
 
-    if (isPrimitive) {
+    if (column.variantFileType().isDefined()) {
+      ParquetColumn fileContentCol = column.variantFileType().get();
+      WritableColumnVector fileContent = memoryMode == MemoryMode.OFF_HEAP
+          ? new OffHeapColumnVector(capacity, fileContentCol.sparkType())
+          : new OnHeapColumnVector(capacity, fileContentCol.sparkType());
+      ParquetColumnVector contentVector = new ParquetColumnVector(fileContentCol,
+          fileContent, capacity, memoryMode, missingColumns, false, null);
+      children.add(contentVector);
+      variantSchema = SparkShreddingUtils.buildVariantSchema(fileContentCol.sparkType());
+      fieldsToExtract = SparkShreddingUtils.getFieldsToExtract(column.sparkType(), variantSchema);
+      repetitionLevels = contentVector.repetitionLevels;
+      definitionLevels = contentVector.definitionLevels;
+    } else if (isPrimitive) {
       if (column.repetitionLevel() > 0) {
         repetitionLevels = allocateLevelsVector(capacity, memoryMode);
       }
@@ -166,6 +188,17 @@ final class ParquetColumnVector {
    * This is a no-op for primitive columns.
    */
   void assemble() {
+    if (variantSchema != null) {
+      children.get(0).assemble();
+      WritableColumnVector fileContent = children.get(0).getValueVector();
+      if (fieldsToExtract == null) {
+        SparkShreddingUtils.assembleVariantBatch(fileContent, vector, variantSchema);
+      } else {
+        SparkShreddingUtils.assembleVariantStructBatch(fileContent, vector, variantSchema,
+            fieldsToExtract);
+      }
+      return;
+    }
     // nothing to do if the column itself is missing
     if (vector.isAllNull()) return;
 
@@ -175,7 +208,7 @@ final class ParquetColumnVector {
         child.assemble();
       }
       assembleCollection();
-    } else if (type instanceof StructType) {
+    } else if (type instanceof StructType || type instanceof VariantType) {
       for (ParquetColumnVector child : children) {
         child.assemble();
       }
@@ -343,14 +376,10 @@ final class ParquetColumnVector {
   }
 
   private static WritableColumnVector allocateLevelsVector(int capacity, MemoryMode memoryMode) {
-    switch (memoryMode) {
-      case ON_HEAP:
-        return new OnHeapColumnVector(capacity, DataTypes.IntegerType);
-      case OFF_HEAP:
-        return new OffHeapColumnVector(capacity, DataTypes.IntegerType);
-      default:
-        throw new IllegalArgumentException("Unknown memory mode: " + memoryMode);
-    }
+    return switch (memoryMode) {
+      case ON_HEAP -> new OnHeapColumnVector(capacity, DataTypes.IntegerType);
+      case OFF_HEAP -> new OffHeapColumnVector(capacity, DataTypes.IntegerType);
+    };
   }
 
   /**

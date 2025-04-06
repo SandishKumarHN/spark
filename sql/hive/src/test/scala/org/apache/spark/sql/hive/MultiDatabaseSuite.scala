@@ -272,8 +272,8 @@ class MultiDatabaseSuite extends QueryTest with SQLTestUtils with TestHiveSingle
         df.write.format("parquet").saveAsTable("`d:b`.`t:a`")
       }
       checkError(e,
-        errorClass = "SCHEMA_NOT_FOUND",
-        parameters = Map("schemaName" -> "`d:b`"))
+        condition = "SCHEMA_NOT_FOUND",
+        parameters = Map("schemaName" -> "`spark_catalog`.`d:b`"))
     }
 
     {
@@ -281,13 +281,13 @@ class MultiDatabaseSuite extends QueryTest with SQLTestUtils with TestHiveSingle
         df.write.format("parquet").saveAsTable("`d:b`.`table`")
       }
       checkError(e,
-        errorClass = "SCHEMA_NOT_FOUND",
-        parameters = Map("schemaName" -> "`d:b`"))
+        condition = "SCHEMA_NOT_FOUND",
+        parameters = Map("schemaName" -> "`spark_catalog`.`d:b`"))
     }
 
     withTempDir { dir =>
       {
-        val message = intercept[AnalysisException] {
+        val e = intercept[AnalysisException] {
           sql(
             s"""
             |CREATE TABLE `d:b`.`t:a` (a int)
@@ -296,9 +296,9 @@ class MultiDatabaseSuite extends QueryTest with SQLTestUtils with TestHiveSingle
             |  path '${dir.toURI}'
             |)
             """.stripMargin)
-        }.getMessage
-        assert(message.contains("`t:a` is not a valid name for tables/databases. " +
-          "Valid names only contain alphabet characters, numbers and _."))
+        }
+        checkError(e, condition = "INVALID_SCHEMA_OR_RELATION_NAME",
+          parameters = Map("name" -> "`t:a`"))
       }
 
       {
@@ -313,8 +313,8 @@ class MultiDatabaseSuite extends QueryTest with SQLTestUtils with TestHiveSingle
               """.stripMargin)
         }
         checkError(e,
-          errorClass = "SCHEMA_NOT_FOUND",
-          parameters = Map("schemaName" -> "`d:b`"))
+          condition = "SCHEMA_NOT_FOUND",
+          parameters = Map("schemaName" -> "`spark_catalog`.`d:b`"))
       }
     }
   }

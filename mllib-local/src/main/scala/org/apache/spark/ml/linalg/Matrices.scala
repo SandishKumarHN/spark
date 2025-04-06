@@ -19,6 +19,7 @@ package org.apache.spark.ml.linalg
 
 import java.util.{Arrays, Random}
 
+import scala.collection.immutable
 import scala.collection.mutable.{ArrayBuffer, ArrayBuilder => MArrayBuilder, HashSet => MHashSet}
 
 import breeze.linalg.{CSCMatrix => BSM, DenseMatrix => BDM, Matrix => BM}
@@ -1047,6 +1048,8 @@ object SparseMatrix {
 @Since("2.0.0")
 object Matrices {
 
+  private[ml] val empty = new DenseMatrix(0, 0, Array.emptyDoubleArray)
+
   private[ml] def fromVectors(vectors: Seq[Vector]): Matrix = {
     val numRows = vectors.length
     val numCols = vectors.head.size
@@ -1241,7 +1244,7 @@ object Matrices {
               cnt += 1
             }
             startCol += nCols
-            data.toSeq
+            immutable.ArraySeq.unsafeWrapArray(data)
           case dnMat: DenseMatrix =>
             val data = new ArrayBuffer[(Int, Int, Double)]()
             dnMat.foreachActive { (i, j, v) =>
@@ -1310,7 +1313,7 @@ object Matrices {
               cnt += 1
             }
             startRow += nRows
-            data.toSeq
+            immutable.ArraySeq.unsafeWrapArray(data)
           case dnMat: DenseMatrix =>
             val data = new ArrayBuffer[(Int, Int, Double)]()
             dnMat.foreachActive { (i, j, v) =>

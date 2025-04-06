@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql.execution.command
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import org.apache.hadoop.fs.Path
 
@@ -74,7 +74,7 @@ trait CreateNamespaceSuiteBase extends QueryTest with DDLCommandTestUtils {
           exception = intercept[SparkIllegalArgumentException] {
             sql(sqlText)
           },
-          errorClass = "INVALID_EMPTY_LOCATION",
+          condition = "INVALID_EMPTY_LOCATION",
           parameters = Map("location" -> ""))
         val uri = new Path(path).toUri
         sql(s"CREATE NAMESPACE $ns LOCATION '$uri'")
@@ -99,7 +99,7 @@ trait CreateNamespaceSuiteBase extends QueryTest with DDLCommandTestUtils {
         sql(s"CREATE NAMESPACE $ns")
       }
       checkError(e,
-        errorClass = "SCHEMA_ALREADY_EXISTS",
+        condition = "SCHEMA_ALREADY_EXISTS",
         parameters = Map("schemaName" -> parsed))
 
       // The following will be no-op since the namespace already exists.
@@ -126,7 +126,7 @@ trait CreateNamespaceSuiteBase extends QueryTest with DDLCommandTestUtils {
             .toDF("k", "v")
             .where("k='Properties'")
             .where("v=''")
-            .count == 1, s"$key is a reserved namespace property and ignored")
+            .count() == 1, s"$key is a reserved namespace property and ignored")
           val meta =
             getCatalog(catalog).asNamespaceCatalog.loadNamespaceMetadata(namespaceArray)
           assert(meta.get(key) == null || !meta.get(key).contains("foo"),

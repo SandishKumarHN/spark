@@ -151,11 +151,11 @@ class ExplainSuite extends ExplainSuiteHelper with DisableAdaptiveExecutionSuite
   }
 
   test("explain table valued functions") {
-    checkKeywordsExistsInExplain(sql("select * from RaNgE(2)"), "Range (0, 2, step=1, splits=None)")
+    checkKeywordsExistsInExplain(sql("select * from RaNgE(2)"), "Range (0, 2, step=1)")
     checkKeywordsExistsInExplain(sql("SELECT * FROM range(3) CROSS JOIN range(3)"),
       "Join Cross",
-      ":- Range (0, 3, step=1, splits=None)",
-      "+- Range (0, 3, step=1, splits=None)")
+      ":- Range (0, 3, step=1)",
+      "+- Range (0, 3, step=1)")
   }
 
   test("explain lateral joins") {
@@ -192,9 +192,11 @@ class ExplainSuite extends ExplainSuiteHelper with DisableAdaptiveExecutionSuite
           |)
         """.stripMargin)
       checkKeywordsExistsInExplain(df2,
-        "Project [concat(cast(id#xL as string), cast((id#xL + 1) as string), " +
-          "cast(encode(cast((id#xL + 2) as string), utf-8) as string), " +
-          "cast(encode(cast((id#xL + 3) as string), utf-8) as string)) AS col#x]")
+        "Project [concat(concat(col1#x, col2#x), cast(concat(col3#x, col4#x) as string)) AS col#x]",
+        "Project [cast(id#xL as string) AS col1#x, " +
+          "cast((id#xL + cast(1 as bigint)) as string) AS col2#x, " +
+          "encode(cast((id#xL + cast(2 as bigint)) as string), utf-8) AS col3#x, " +
+          "encode(cast((id#xL + cast(3 as bigint)) as string), utf-8) AS col4#x]")
 
       val df3 = sql(
         """
@@ -208,9 +210,10 @@ class ExplainSuite extends ExplainSuiteHelper with DisableAdaptiveExecutionSuite
           |)
         """.stripMargin)
       checkKeywordsExistsInExplain(df3,
-        "Project [concat(cast(id#xL as string), " +
-          "cast(encode(cast((id#xL + 2) as string), utf-8) as string), " +
-          "cast(encode(cast((id#xL + 3) as string), utf-8) as string)) AS col#x]")
+        "Project [concat(col1#x, cast(concat(col3#x, col4#x) as string)) AS col#x]",
+        "Project [cast(id#xL as string) AS col1#x, " +
+          "encode(cast((id#xL + cast(2 as bigint)) as string), utf-8) AS col3#x, " +
+          "encode(cast((id#xL + cast(3 as bigint)) as string), utf-8) AS col4#x]")
     }
   }
 
@@ -423,7 +426,7 @@ class ExplainSuite extends ExplainSuiteHelper with DisableAdaptiveExecutionSuite
   }
 
   test("Dataset.toExplainString has mode as string") {
-    val df = spark.range(10).toDF
+    val df = spark.range(10).toDF()
     def assertExplainOutput(mode: ExplainMode): Unit = {
       assert(df.queryExecution.explainString(mode).replaceAll("#\\d+", "#x").trim ===
         getNormalizedExplain(df, mode).trim)
@@ -554,31 +557,33 @@ class ExplainSuiteAE extends ExplainSuiteHelper with EnableAdaptiveExecutionSuit
     val testDf = df1.join(df2, "k").groupBy("k").agg(count("v1"), sum("v1"), avg("v2"))
     // trigger the final plan for AQE
     testDf.collect()
-    // AdaptiveSparkPlan (21)
+
+    // AdaptiveSparkPlan (22)
     // +- == Final Plan ==
-    //    * HashAggregate (12)
-    //    +- AQEShuffleRead (11)
-    //       +- ShuffleQueryStage (10)
-    //          +- Exchange (9)
-    //             +- * HashAggregate (8)
-    //                +- * Project (7)
-    //                   +- * BroadcastHashJoin Inner BuildRight (6)
-    //                      :- * LocalTableScan (1)
-    //                      +- BroadcastQueryStage (5)
-    //                         +- BroadcastExchange (4)
-    //                            +- * Project (3)
-    //                               +- * LocalTableScan (2)
+    //   ResultQueryStage (13)
+    //   +- * HashAggregate (12)
+    //      +- AQEShuffleRead (11)
+    //         +- ShuffleQueryStage (10)
+    //            +- Exchange (9)
+    //               +- * HashAggregate (8)
+    //                  +- * Project (7)
+    //                     +- * BroadcastHashJoin Inner BuildRight (6)
+    //                        :- * LocalTableScan (1)
+    //                        +- BroadcastQueryStage (5)
+    //                           +- BroadcastExchange (4)
+    //                              +- * Project (3)
+    //                                 +- * LocalTableScan (2)
     // +- == Initial Plan ==
-    //    HashAggregate (20)
-    //    +- Exchange (19)
-    //       +- HashAggregate (18)
-    //          +- Project (17)
-    //             +- BroadcastHashJoin Inner BuildRight (16)
-    //                :- Project (14)
-    //                :  +- LocalTableScan (13)
-    //                +- BroadcastExchange (15)
-    //                   +- Project (3)
-    //                      +- LocalTableScan (2)
+    //   HashAggregate (21)
+    //   +- Exchange (20)
+    //      +- HashAggregate (19)
+    //         +- Project (18)
+    //            +- BroadcastHashJoin Inner BuildRight (17)
+    //               :- Project (15)
+    //               :  +- LocalTableScan (14)
+    //               +- BroadcastExchange (16)
+    //                  +- Project (3)
+    //                     +- LocalTableScan (2)
     checkKeywordsExistsInExplain(
       testDf,
       FormattedMode,
@@ -596,18 +601,18 @@ class ExplainSuiteAE extends ExplainSuiteHelper with EnableAdaptiveExecutionSuit
         |Arguments: coalesced
         |""".stripMargin,
       """
-        |(16) BroadcastHashJoin
+        |(17) BroadcastHashJoin
         |Left keys [1]: [k#x]
         |Right keys [1]: [k#x]
         |Join type: Inner
         |Join condition: None
         |""".stripMargin,
       """
-        |(19) Exchange
+        |(20) Exchange
         |Input [5]: [k#x, count#xL, sum#xL, sum#x, count#xL]
         |""".stripMargin,
       """
-        |(21) AdaptiveSparkPlan
+        |(22) AdaptiveSparkPlan
         |Output [4]: [k#x, count(v1)#xL, sum(v1)#xL, avg(v2)#x]
         |Arguments: isFinalPlan=true
         |""".stripMargin
@@ -653,7 +658,7 @@ class ExplainSuiteAE extends ExplainSuiteHelper with EnableAdaptiveExecutionSuit
           |Output [1]: [id#xL]
           |Arguments: 0""".stripMargin,
         """
-          |(12) AdaptiveSparkPlan
+          |(13) AdaptiveSparkPlan
           |Output [2]: [key#xL, value#xL]
           |Arguments: isFinalPlan=true
           |""".stripMargin,
@@ -661,11 +666,11 @@ class ExplainSuiteAE extends ExplainSuiteHelper with EnableAdaptiveExecutionSuit
           |Subquery:1 Hosting operator id = 2 Hosting Expression = Subquery subquery#x, [id=#x]
           |""".stripMargin,
         """
-          |(16) ShuffleQueryStage
+          |(17) ShuffleQueryStage
           |Output [1]: [max#xL]
           |Arguments: 0""".stripMargin,
         """
-          |(20) AdaptiveSparkPlan
+          |(22) AdaptiveSparkPlan
           |Output [1]: [max(id)#xL]
           |Arguments: isFinalPlan=true
           |""".stripMargin
@@ -736,7 +741,7 @@ class ExplainSuiteAE extends ExplainSuiteHelper with EnableAdaptiveExecutionSuit
       val query = "SELECT * FROM (SELECT * FROM t1) join t2 " +
         "ON k = t2.key"
       val df = sql(query).toDF()
-
+      df.collect()
       val inMemoryRelationRegex = """InMemoryRelation \(([0-9]+)\)""".r
       val columnarToRowRegex = """ColumnarToRow \(([0-9]+)\)""".r
       val explainString = getNormalizedExplain(df, FormattedMode)

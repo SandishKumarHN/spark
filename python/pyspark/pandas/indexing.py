@@ -25,11 +25,12 @@ from typing import Any, Optional, List, Tuple, TYPE_CHECKING, Union, cast, Sized
 
 import pandas as pd
 from pandas.api.types import is_list_like  # type: ignore[attr-defined]
-from pyspark.sql import functions as F, Column as PySparkColumn
-from pyspark.sql.types import BooleanType, LongType, DataType
-from pyspark.errors import AnalysisException
 import numpy as np
 
+from pyspark.sql import functions as F, Column as PySparkColumn
+from pyspark.sql.types import BooleanType, LongType, DataType
+from pyspark.sql.utils import is_remote
+from pyspark.errors import AnalysisException
 from pyspark import pandas as ps  # noqa: F401
 from pyspark.pandas._typing import Label, Name, Scalar
 from pyspark.pandas.internal import (
@@ -50,9 +51,6 @@ from pyspark.pandas.utils import (
     spark_column_equals,
     verify_temp_column_name,
 )
-
-# For Supporting Spark Connect
-from pyspark.sql.utils import is_remote
 
 if TYPE_CHECKING:
     from pyspark.pandas.frame import DataFrame
@@ -125,7 +123,7 @@ class AtIndexer(IndexerLike):
 
     Get value at specified row/column pair
 
-    >>> psdf.at[4, 'B']
+    >>> int(psdf.at[4, 'B'])
     2
 
     Get array if an index occurs multiple times
@@ -205,7 +203,7 @@ class iAtIndexer(IndexerLike):
 
     Get value at specified row/column pair
 
-    >>> df.iat[1, 2]
+    >>> int(df.iat[1, 2])
     1
 
     Get value within a series
@@ -217,7 +215,7 @@ class iAtIndexer(IndexerLike):
     30    3
     dtype: int64
 
-    >>> psser.iat[1]
+    >>> int(psser.iat[1])
     2
     """
 
@@ -261,18 +259,12 @@ class LocIndexerLike(IndexerLike, metaclass=ABCMeta):
         """
         from pyspark.pandas.series import Series
 
-        if is_remote():
-            from pyspark.sql.connect.column import Column as ConnectColumn
-
-            Column = ConnectColumn
-        else:
-            Column = PySparkColumn  # type: ignore[assignment]
         if rows_sel is None:
             return None, None, None
         elif isinstance(rows_sel, Series):
             return self._select_rows_by_series(rows_sel)
-        elif isinstance(rows_sel, Column):
-            return self._select_rows_by_spark_column(rows_sel)  # type: ignore[arg-type]
+        elif isinstance(rows_sel, PySparkColumn):
+            return self._select_rows_by_spark_column(rows_sel)
         elif isinstance(rows_sel, slice):
             if rows_sel == slice(None):
                 # If slice is None - select everything, so nothing to do
@@ -313,12 +305,6 @@ class LocIndexerLike(IndexerLike, metaclass=ABCMeta):
         """
         from pyspark.pandas.series import Series
 
-        if is_remote():
-            from pyspark.sql.connect.column import Column as ConnectColumn
-
-            Column = ConnectColumn
-        else:
-            Column = PySparkColumn  # type: ignore[assignment]
         if cols_sel is None:
             column_labels = self._internal.column_labels
             data_spark_columns = self._internal.data_spark_columns
@@ -326,10 +312,8 @@ class LocIndexerLike(IndexerLike, metaclass=ABCMeta):
             return column_labels, data_spark_columns, data_fields, False, None
         elif isinstance(cols_sel, Series):
             return self._select_cols_by_series(cols_sel, missing_keys)
-        elif isinstance(cols_sel, Column):
-            return self._select_cols_by_spark_column(
-                cols_sel, missing_keys  # type: ignore[arg-type]
-            )
+        elif isinstance(cols_sel, PySparkColumn):
+            return self._select_cols_by_spark_column(cols_sel, missing_keys)
         elif isinstance(cols_sel, slice):
             if cols_sel == slice(None):
                 # If slice is None - select everything, so nothing to do
@@ -551,11 +535,19 @@ class LocIndexerLike(IndexerLike, metaclass=ABCMeta):
                     sdf = sdf.limit(sdf.count() + limit)
                 sdf = sdf.drop(NATURAL_ORDER_COLUMN_NAME)
         except AnalysisException:
-            raise KeyError(
-                "[{}] don't exist in columns".format(
-                    [col._jc.toString() for col in data_spark_columns]
-                )
-            )
+            if is_remote():
+                from pyspark.sql.connect.column import Column as ConnectColumn
+
+                cols_as_str = [
+                    cast(ConnectColumn, col)._expr.__repr__() for col in data_spark_columns
+                ]
+            else:
+                from pyspark.sql.classic.column import Column as ClassicColumn
+
+                cols_as_str = [
+                    cast(ClassicColumn, col)._jc.toString() for col in data_spark_columns
+                ]
+            raise KeyError("[{}] don't exist in columns".format(cols_as_str))
 
         internal = InternalFrame(
             spark_frame=sdf,
@@ -593,12 +585,6 @@ class LocIndexerLike(IndexerLike, metaclass=ABCMeta):
         from pyspark.pandas.frame import DataFrame
         from pyspark.pandas.series import Series, first_series
 
-        if is_remote():
-            from pyspark.sql.connect.column import Column as ConnectColumn
-
-            Column = ConnectColumn
-        else:
-            Column = PySparkColumn  # type: ignore[assignment]
         if self._is_series:
             if (
                 isinstance(key, Series)
@@ -658,7 +644,7 @@ class LocIndexerLike(IndexerLike, metaclass=ABCMeta):
                     self._internal.spark_frame[cast(iLocIndexer, self)._sequence_col] < F.lit(limit)
                 )
 
-            if isinstance(value, (Series, Column)):
+            if isinstance(value, (Series, PySparkColumn)):
                 if remaining_index is not None and remaining_index == 0:
                     raise ValueError(
                         "No axis named {} for object type {}".format(key, type(value).__name__)
@@ -743,7 +729,7 @@ class LocIndexerLike(IndexerLike, metaclass=ABCMeta):
                     self._internal.spark_frame[cast(iLocIndexer, self)._sequence_col] < F.lit(limit)
                 )
 
-            if isinstance(value, (Series, Column)):
+            if isinstance(value, (Series, PySparkColumn)):
                 if remaining_index is not None and remaining_index == 0:
                     raise ValueError("Incompatible indexer with Series")
                 if len(data_spark_columns) > 1:
@@ -876,7 +862,7 @@ class LocIndexer(LocIndexerLike):
 
     Single label for column.
 
-    >>> df.loc['cobra', 'shield']
+    >>> int(df.loc['cobra', 'shield'])
     2
 
     List of labels for row.
@@ -1067,7 +1053,6 @@ class LocIndexer(LocIndexerLike):
             if (start is None and rows_sel.start is not None) or (
                 stop is None and rows_sel.stop is not None
             ):
-
                 inc = index_column.is_monotonic_increasing
                 if inc is False:
                     dec = index_column.is_monotonic_decreasing
@@ -1095,12 +1080,16 @@ class LocIndexer(LocIndexerLike):
 
             return reduce(lambda x, y: x & y, conds), None, None
         else:
-            from pyspark.sql.types import StructType
+            from pyspark.sql.types import ArrayType, StructType
 
             index = self._psdf_or_psser.index
-            index_data_type = [  # type: ignore[assignment]
-                f.dataType for f in cast(StructType, index.to_series().spark.data_type)
-            ]
+            data_type = index.to_series().spark.data_type
+            if isinstance(data_type, StructType):
+                index_data_type = [f.dataType for f in data_type]  # type: ignore[assignment]
+            elif isinstance(data_type, ArrayType):
+                index_data_type = [  # type: ignore[assignment]
+                    data_type.elementType for _ in range(index._internal.index_level)
+                ]
 
             start = rows_sel.start
             if start is not None:
@@ -1122,7 +1111,9 @@ class LocIndexer(LocIndexerLike):
                 return None, None, None
             elif (
                 depth > self._internal.index_level
-                or not index.droplevel(list(range(self._internal.index_level)[depth:])).is_monotonic
+                or not index.droplevel(
+                    list(range(self._internal.index_level)[depth:])
+                ).is_monotonic_increasing
             ):
                 raise KeyError(
                     "Key length ({}) was greater than MultiIndex sort depth".format(depth)
@@ -1139,16 +1130,8 @@ class LocIndexer(LocIndexerLike):
                     )
                 )[::-1]:
                     compare = MultiIndex._comparator_for_monotonic_increasing(dt)
-                    if is_remote():
-                        from pyspark.sql.connect.column import Column as ConnectColumn
-
-                        Column = ConnectColumn
-                    else:
-                        Column = PySparkColumn  # type: ignore[assignment]
                     cond = F.when(scol.eqNullSafe(F.lit(value).cast(dt)), cond).otherwise(
-                        compare(
-                            scol, F.lit(value).cast(dt), Column.__gt__  # type: ignore[arg-type]
-                        )
+                        compare(scol, F.lit(value).cast(dt), PySparkColumn.__gt__)
                     )
                 conds.append(cond)
             if stop is not None:
@@ -1161,16 +1144,8 @@ class LocIndexer(LocIndexerLike):
                     )
                 )[::-1]:
                     compare = MultiIndex._comparator_for_monotonic_increasing(dt)
-                    if is_remote():
-                        from pyspark.sql.connect.column import Column as ConnectColumn
-
-                        Column = ConnectColumn
-                    else:
-                        Column = PySparkColumn  # type: ignore[assignment]
                     cond = F.when(scol.eqNullSafe(F.lit(value).cast(dt)), cond).otherwise(
-                        compare(
-                            scol, F.lit(value).cast(dt), Column.__lt__  # type: ignore[arg-type]
-                        )
+                        compare(scol, F.lit(value).cast(dt), PySparkColumn.__lt__)
                     )
                 conds.append(cond)
 
@@ -1328,17 +1303,11 @@ class LocIndexer(LocIndexerLike):
     ]:
         from pyspark.pandas.series import Series
 
-        if is_remote():
-            from pyspark.sql.connect.column import Column as ConnectColumn
-
-            Column = ConnectColumn
-        else:
-            Column = PySparkColumn  # type: ignore[assignment]
         if all(isinstance(key, Series) for key in cols_sel):
             column_labels = [key._column_label for key in cols_sel]
             data_spark_columns = [key.spark.column for key in cols_sel]
             data_fields = [key._internal.data_fields[0] for key in cols_sel]
-        elif all(isinstance(key, Column) for key in cols_sel):
+        elif all(isinstance(key, PySparkColumn) for key in cols_sel):
             column_labels = [
                 (self._internal.spark_frame.select(col).columns[0],) for col in cols_sel
             ]
@@ -1837,13 +1806,7 @@ class iLocIndexer(LocIndexerLike):
             )
 
     def __setitem__(self, key: Any, value: Any) -> None:
-        if is_remote():
-            from pyspark.sql.connect.column import Column as ConnectColumn
-
-            Column = ConnectColumn
-        else:
-            Column = PySparkColumn  # type: ignore[assignment]
-        if not isinstance(value, Column) and is_list_like(value):
+        if not isinstance(value, PySparkColumn) and is_list_like(value):
             iloc_item = self[key]
             if not is_list_like(key) or not is_list_like(iloc_item):
                 raise ValueError("setting an array element with a sequence.")
@@ -1879,8 +1842,15 @@ def _test() -> None:
     import sys
     from pyspark.sql import SparkSession
     import pyspark.pandas.indexing
+    from pandas.util.version import Version
 
     os.chdir(os.environ["SPARK_HOME"])
+
+    if Version(np.__version__) >= Version("2"):
+        # Numpy 2.0+ changed its string format,
+        # adding type information to numeric scalars.
+        # `legacy="1.25"` only available in `nump>=2`
+        np.set_printoptions(legacy="1.25")  # type: ignore[arg-type]
 
     globs = pyspark.pandas.indexing.__dict__.copy()
     globs["ps"] = pyspark.pandas

@@ -18,18 +18,39 @@
 package org.apache.spark.sql.execution.python
 
 import org.apache.spark.sql.execution.SparkPlan
-import org.apache.spark.sql.execution.metric.SQLMetrics
+import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics}
 
-private[sql] trait PythonSQLMetrics { self: SparkPlan =>
+trait PythonSQLMetrics { self: SparkPlan =>
+  protected val pythonMetrics: Map[String, SQLMetric] = {
+    PythonSQLMetrics.pythonSizeMetricsDesc.map { case (k, v) =>
+      k -> SQLMetrics.createSizeMetric(sparkContext, v)
+    } ++ PythonSQLMetrics.pythonTimingMetricsDesc.map { case (k, v) =>
+      k -> SQLMetrics.createTimingMetric(sparkContext, v)
+    } ++ PythonSQLMetrics.pythonOtherMetricsDesc.map { case (k, v) =>
+      k -> SQLMetrics.createMetric(sparkContext, v)
+    }
+  }
 
-  val pythonMetrics = Map(
-    "pythonDataSent" -> SQLMetrics.createSizeMetric(sparkContext,
-      "data sent to Python workers"),
-    "pythonDataReceived" -> SQLMetrics.createSizeMetric(sparkContext,
-      "data returned from Python workers"),
-    "pythonNumRowsReceived" -> SQLMetrics.createMetric(sparkContext,
-      "number of output rows")
-  )
+  override lazy val metrics: Map[String, SQLMetric] = pythonMetrics
+}
 
-  override lazy val metrics = pythonMetrics
+object PythonSQLMetrics {
+  val pythonSizeMetricsDesc: Map[String, String] = {
+    Map(
+      "pythonDataSent" -> "data sent to Python workers",
+      "pythonDataReceived" -> "data returned from Python workers"
+    )
+  }
+
+  val pythonTimingMetricsDesc: Map[String, String] = {
+    Map(
+      "pythonBootTime" -> "time to start Python workers",
+      "pythonInitTime" -> "time to initialize Python workers",
+      "pythonTotalTime" -> "time to run Python workers"
+    )
+  }
+
+  val pythonOtherMetricsDesc: Map[String, String] = {
+    Map("pythonNumRowsReceived" -> "number of output rows")
+  }
 }

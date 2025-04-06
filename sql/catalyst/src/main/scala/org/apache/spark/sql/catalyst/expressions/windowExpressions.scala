@@ -23,12 +23,12 @@ import org.apache.spark.SparkException
 import org.apache.spark.sql.catalyst.analysis.{TypeCheckResult, UnresolvedException}
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult.{DataTypeMismatch, TypeCheckSuccess}
 import org.apache.spark.sql.catalyst.dsl.expressions._
-import org.apache.spark.sql.catalyst.expressions.Cast.{toSQLExpr, toSQLType}
-import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateFunction, DeclarativeAggregate, NoOp}
+import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateFunction, DeclarativeAggregate, NoOp, PandasAggregate}
 import org.apache.spark.sql.catalyst.trees.{BinaryLike, LeafLike, TernaryLike, UnaryLike}
 import org.apache.spark.sql.catalyst.trees.TreePattern.{TreePattern, UNRESOLVED_WINDOW_EXPRESSION, WINDOW_EXPRESSION}
-import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryErrorsBase, QueryExecutionErrors}
+import org.apache.spark.sql.errors.{DataTypeErrorsBase, QueryCompilationErrors, QueryErrorsBase, QueryExecutionErrors}
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.types.DayTimeIntervalType.DAY
 
 /**
  * The trait of the Window Specification (specified in the OVER clause or WINDOW clause) for
@@ -46,7 +46,8 @@ sealed trait WindowSpec
 case class WindowSpecDefinition(
     partitionSpec: Seq[Expression],
     orderSpec: Seq[SortOrder],
-    frameSpecification: WindowFrame) extends Expression with WindowSpec with Unevaluable {
+    frameSpecification: WindowFrame)
+  extends Expression with WindowSpec with Unevaluable with DataTypeErrorsBase {
 
   override def children: Seq[Expression] = partitionSpec ++ orderSpec :+ frameSpecification
 
@@ -62,7 +63,7 @@ case class WindowSpecDefinition(
       checkInputDataTypes().isSuccess
 
   override def nullable: Boolean = true
-  override def dataType: DataType = throw QueryCompilationErrors.dataTypeOperationUnsupportedError
+  override def dataType: DataType = throw QueryCompilationErrors.dataTypeOperationUnsupportedError()
 
   override def checkInputDataTypes(): TypeCheckResult = {
     frameSpecification match {
@@ -108,6 +109,7 @@ case class WindowSpecDefinition(
   private def isValidFrameType(ft: DataType): Boolean = (orderSpec.head.dataType, ft) match {
     case (DateType, IntegerType) => true
     case (DateType, _: YearMonthIntervalType) => true
+    case (DateType, DayTimeIntervalType(DAY, DAY)) => true
     case (TimestampType | TimestampNTZType, CalendarIntervalType) => true
     case (TimestampType | TimestampNTZType, _: YearMonthIntervalType) => true
     case (TimestampType | TimestampNTZType, _: DayTimeIntervalType) => true
@@ -182,7 +184,7 @@ case object CurrentRow extends SpecialFrameBoundary {
  * Represents a window frame.
  */
 sealed trait WindowFrame extends Expression with Unevaluable {
-  override def dataType: DataType = throw QueryCompilationErrors.dataTypeOperationUnsupportedError
+  override def dataType: DataType = throw QueryCompilationErrors.dataTypeOperationUnsupportedError()
   override def nullable: Boolean = false
 }
 
@@ -197,7 +199,7 @@ case class SpecifiedWindowFrame(
     frameType: FrameType,
     lower: Expression,
     upper: Expression)
-  extends WindowFrame with BinaryLike[Expression] {
+  extends WindowFrame with BinaryLike[Expression] with QueryErrorsBase {
 
   override def left: Expression = lower
   override def right: Expression = upper
@@ -333,6 +335,11 @@ object WindowExpression {
   def hasWindowExpression(e: Expression): Boolean = {
     e.find(_.isInstanceOf[WindowExpression]).isDefined
   }
+
+  def expressionToIngnoreNulls(e: Expression, source: String): Boolean = e match {
+    case BooleanLiteral(ignoreNulls) => ignoreNulls
+    case _ => throw QueryCompilationErrors.invalidIgnoreNullsParameter(source, e)
+  }
 }
 
 case class WindowExpression(
@@ -439,7 +446,10 @@ trait OffsetWindowFunction extends WindowFunction {
  * will get the value of x 2 rows back from the current row in the partition.
  */
 sealed abstract class FrameLessOffsetWindowFunction
-  extends OffsetWindowFunction with Unevaluable with ImplicitCastInputTypes {
+  extends OffsetWindowFunction
+  with Unevaluable
+  with ImplicitCastInputTypes
+  with QueryErrorsBase {
 
   /*
    * The result of an OffsetWindowFunction is dependent on the frame in which the
@@ -464,7 +474,7 @@ sealed abstract class FrameLessOffsetWindowFunction
       DataTypeMismatch(
         errorSubClass = "NON_FOLDABLE_INPUT",
         messageParameters = Map(
-          "inputName" -> "offset",
+          "inputName" -> toSQLId("offset"),
           "inputType" -> toSQLType(offset.dataType),
           "inputExpr" -> toSQLExpr(offset)
         )
@@ -522,6 +532,9 @@ case class Lead(
   def this(input: Expression, offset: Expression, default: Expression) =
     this(input, offset, default, false)
 
+  def this(input: Expression, offset: Expression, default: Expression, ignoreNulls: Expression) =
+    this(input, offset, default, WindowExpression.expressionToIngnoreNulls(ignoreNulls, "lead"))
+
   def this(input: Expression, offset: Expression) = this(input, offset, Literal(null))
 
   def this(input: Expression) = this(input, Literal(1))
@@ -576,6 +589,9 @@ case class Lag(
   def this(input: Expression, inputOffset: Expression, default: Expression) =
     this(input, inputOffset, default, false)
 
+  def this(input: Expression, offset: Expression, default: Expression, ignoreNulls: Expression) =
+    this(input, offset, default, WindowExpression.expressionToIngnoreNulls(ignoreNulls, "lag"))
+
   def this(input: Expression, inputOffset: Expression) = this(input, inputOffset, Literal(null))
 
   def this(input: Expression) = this(input, Literal(1))
@@ -602,7 +618,7 @@ abstract class AggregateWindowFunction extends DeclarativeAggregate with WindowF
   override def dataType: DataType = IntegerType
   override def nullable: Boolean = true
   override lazy val mergeExpressions =
-    throw QueryExecutionErrors.mergeUnsupportedByWindowFunctionError
+    throw QueryExecutionErrors.mergeUnsupportedByWindowFunctionError(prettyName)
 }
 
 abstract class RowNumberLike extends AggregateWindowFunction {
@@ -723,6 +739,8 @@ case class NthValue(input: Expression, offset: Expression, ignoreNulls: Boolean)
     extends AggregateWindowFunction with OffsetWindowFunction with ImplicitCastInputTypes
     with BinaryLike[Expression] with QueryErrorsBase {
 
+  def this(input: Expression, offset: Expression, ignoreNulls: Expression) =
+    this(input, offset, WindowExpression.expressionToIngnoreNulls(ignoreNulls, "nth_value"))
   def this(child: Expression, offset: Expression) = this(child, offset, false)
 
   override lazy val default = Literal.create(null, input.dataType)
@@ -744,7 +762,7 @@ case class NthValue(input: Expression, offset: Expression, ignoreNulls: Boolean)
       DataTypeMismatch(
         errorSubClass = "NON_FOLDABLE_INPUT",
         messageParameters = Map(
-          "inputName" -> "offset",
+          "inputName" -> toSQLId("offset"),
           "inputType" -> toSQLType(offset.dataType),
           "inputExpr" -> toSQLExpr(offset)
         )
@@ -850,10 +868,10 @@ case class NTile(buckets: Expression) extends RowNumberLike with SizeBasedWindow
   // for each partition.
   override def checkInputDataTypes(): TypeCheckResult = {
     if (!buckets.foldable) {
-      DataTypeMismatch(
+      return DataTypeMismatch(
         errorSubClass = "NON_FOLDABLE_INPUT",
         messageParameters = Map(
-          "inputName" -> "buckets",
+          "inputName" -> toSQLId("buckets"),
           "inputType" -> toSQLType(buckets.dataType),
           "inputExpr" -> toSQLExpr(buckets)
         )
@@ -861,10 +879,10 @@ case class NTile(buckets: Expression) extends RowNumberLike with SizeBasedWindow
     }
 
     if (buckets.dataType != IntegerType) {
-      DataTypeMismatch(
+      return DataTypeMismatch(
         errorSubClass = "UNEXPECTED_INPUT_TYPE",
         messageParameters = Map(
-          "paramIndex" -> "1",
+          "paramIndex" -> ordinalNumber(0),
           "requiredType" -> toSQLType(IntegerType),
           "inputSql" -> toSQLExpr(buckets),
           "inputType" -> toSQLType(buckets.dataType))
@@ -1110,6 +1128,9 @@ case class EWM(input: Expression, alpha: Double, ignoreNA: Boolean)
   extends AggregateWindowFunction with UnaryLike[Expression] {
   assert(0 < alpha && alpha <= 1)
 
+  def this(input: Expression, alpha: Expression, ignoreNA: Expression) =
+    this(input, EWM.expressionToAlpha(alpha), PandasAggregate.expressionToIgnoreNA(ignoreNA, "ewm"))
+
   override def dataType: DataType = DoubleType
 
   private val numerator = AttributeReference("numerator", DoubleType, nullable = false)()
@@ -1151,43 +1172,13 @@ case class EWM(input: Expression, alpha: Double, ignoreNA: Boolean)
   override protected def withNewChildInternal(newChild: Expression): EWM = copy(input = newChild)
 }
 
-
-/**
- * Keep the last non-null value seen if any. This expression is dedicated only for
- * Pandas API on Spark.
- * For example,
- *  Input: null, 1, 2, 3, null, 4, 5, null
- *  Output: null, 1, 2, 3, 3, 4, 5, 5
- */
-case class LastNonNull(input: Expression)
-  extends AggregateWindowFunction with UnaryLike[Expression] {
-
-  override def dataType: DataType = input.dataType
-
-  private val last = AttributeReference("last", dataType, nullable = true)()
-
-  override def aggBufferAttributes: Seq[AttributeReference] = last :: Nil
-
-  override val initialValues: Seq[Expression] = Seq(Literal.create(null, dataType))
-
-  override val updateExpressions: Seq[Expression] = {
-    Seq(
-      /* last = */ If(IsNull(input), last, input)
-    )
+private[expressions] object EWM {
+  def expressionToAlpha(e: Expression): Double = e.eval() match {
+    case d: Double => d
+    case f: Float => f.toDouble
+    case _ => throw QueryCompilationErrors.invalidAlphaParameter(e)
   }
-
-  override val evaluateExpression: Expression = last
-
-  override def prettyName: String = "last_non_null"
-
-  override def sql: String = s"$prettyName(${input.sql})"
-
-  override def child: Expression = input
-
-  override protected def withNewChildInternal(newChild: Expression): LastNonNull =
-    copy(input = newChild)
 }
-
 
 /**
  * Return the indices for consecutive null values, for non-null values, it returns 0.

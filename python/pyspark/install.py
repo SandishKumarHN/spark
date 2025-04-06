@@ -163,7 +163,7 @@ def install_spark(dest, spark_version, hadoop_version, hive_version):
                 tar.close()
             if os.path.exists(package_local_path):
                 os.remove(package_local_path)
-    raise IOError("Unable to download %s." % pretty_pkg_name)
+    raise OSError("Unable to download %s." % pretty_pkg_name)
 
 
 def get_preferred_mirrors():
@@ -179,10 +179,11 @@ def get_preferred_mirrors():
             pass
 
     default_sites = [
+        "https://dlcdn.apache.org/",
         "https://archive.apache.org/dist",
         "https://dist.apache.org/repos/dist/release",
     ]
-    return list(set(mirror_urls)) + default_sites
+    return list(set(mirror_urls)) + [x for x in default_sites if x not in mirror_urls]
 
 
 def download_to_file(response, path, chunk_size=1024 * 1024):

@@ -55,7 +55,7 @@ EXPLAIN EXTENDED
 struct<plan:string>
 -- !query output
 == Parsed Logical Plan ==
-'Project [unresolvedalias('sum(distinct 'val), None)]
+'Project [unresolvedalias('sum(distinct 'val))]
 +- 'UnresolvedRelation [explain_temp1], [], false
 
 == Analyzed Logical Plan ==
@@ -405,7 +405,7 @@ struct<plan:string>
 Output [2]: [key#x, val#x]
 Batched: true
 Location [not included in comparison]/{warehouse_dir}/explain_temp1]
-PushedFilters: [IsNotNull(key), IsNotNull(val), GreaterThan(val,3)]
+PushedFilters: [IsNotNull(key), IsNotNull(val), EqualTo(key,ScalarSubquery#x), GreaterThan(val,3)]
 ReadSchema: struct<key:int,val:int>
 
 (2) ColumnarToRow [codegen id : 1]
@@ -413,11 +413,13 @@ Input [2]: [key#x, val#x]
 
 (3) Filter [codegen id : 1]
 Input [2]: [key#x, val#x]
-Condition : (((isnotnull(key#x) AND isnotnull(val#x)) AND (key#x = Subquery scalar-subquery#x, [id=#x])) AND (val#x > 3))
+Condition : (((isnotnull(key#x) AND isnotnull(val#x)) AND (key#x = ReusedSubquery Subquery scalar-subquery#x, [id=#x])) AND (val#x > 3))
 
 ===== Subqueries =====
 
-Subquery:1 Hosting operator id = 3 Hosting Expression = Subquery scalar-subquery#x, [id=#x]
+Subquery:1 Hosting operator id = 3 Hosting Expression = ReusedSubquery Subquery scalar-subquery#x, [id=#x]
+
+Subquery:2 Hosting operator id = 1 Hosting Expression = Subquery scalar-subquery#x, [id=#x]
 * HashAggregate (10)
 +- Exchange (9)
    +- * HashAggregate (8)
@@ -431,7 +433,7 @@ Subquery:1 Hosting operator id = 3 Hosting Expression = Subquery scalar-subquery
 Output [2]: [key#x, val#x]
 Batched: true
 Location [not included in comparison]/{warehouse_dir}/explain_temp2]
-PushedFilters: [IsNotNull(key), IsNotNull(val), EqualTo(val,2)]
+PushedFilters: [IsNotNull(key), IsNotNull(val), EqualTo(key,ScalarSubquery#x), EqualTo(val,2)]
 ReadSchema: struct<key:int,val:int>
 
 (5) ColumnarToRow [codegen id : 1]
@@ -439,7 +441,7 @@ Input [2]: [key#x, val#x]
 
 (6) Filter [codegen id : 1]
 Input [2]: [key#x, val#x]
-Condition : (((isnotnull(key#x) AND isnotnull(val#x)) AND (key#x = Subquery scalar-subquery#x, [id=#x])) AND (val#x = 2))
+Condition : (((isnotnull(key#x) AND isnotnull(val#x)) AND (key#x = ReusedSubquery Subquery scalar-subquery#x, [id=#x])) AND (val#x = 2))
 
 (7) Project [codegen id : 1]
 Output [1]: [key#x]
@@ -463,7 +465,9 @@ Functions [1]: [max(key#x)]
 Aggregate Attributes [1]: [max(key#x)#x]
 Results [1]: [max(key#x)#x AS max(key)#x]
 
-Subquery:2 Hosting operator id = 6 Hosting Expression = Subquery scalar-subquery#x, [id=#x]
+Subquery:3 Hosting operator id = 6 Hosting Expression = ReusedSubquery Subquery scalar-subquery#x, [id=#x]
+
+Subquery:4 Hosting operator id = 4 Hosting Expression = Subquery scalar-subquery#x, [id=#x]
 * HashAggregate (17)
 +- Exchange (16)
    +- * HashAggregate (15)
@@ -541,11 +545,15 @@ Input [2]: [key#x, val#x]
 
 (3) Filter [codegen id : 1]
 Input [2]: [key#x, val#x]
-Condition : ((key#x = Subquery scalar-subquery#x, [id=#x]) OR (cast(key#x as double) = Subquery scalar-subquery#x, [id=#x]))
+Condition : ((key#x = ReusedSubquery Subquery scalar-subquery#x, [id=#x]) OR (cast(key#x as double) = ReusedSubquery Subquery scalar-subquery#x, [id=#x]))
 
 ===== Subqueries =====
 
-Subquery:1 Hosting operator id = 3 Hosting Expression = Subquery scalar-subquery#x, [id=#x]
+Subquery:1 Hosting operator id = 3 Hosting Expression = ReusedSubquery Subquery scalar-subquery#x, [id=#x]
+
+Subquery:2 Hosting operator id = 3 Hosting Expression = ReusedSubquery Subquery scalar-subquery#x, [id=#x]
+
+Subquery:3 Hosting operator id = 1 Hosting Expression = Subquery scalar-subquery#x, [id=#x]
 * HashAggregate (10)
 +- Exchange (9)
    +- * HashAggregate (8)
@@ -591,7 +599,7 @@ Functions [1]: [max(key#x)]
 Aggregate Attributes [1]: [max(key#x)#x]
 Results [1]: [max(key#x)#x AS max(key)#x]
 
-Subquery:2 Hosting operator id = 3 Hosting Expression = Subquery scalar-subquery#x, [id=#x]
+Subquery:4 Hosting operator id = 1 Hosting Expression = Subquery scalar-subquery#x, [id=#x]
 * HashAggregate (17)
 +- Exchange (16)
    +- * HashAggregate (15)
@@ -845,6 +853,50 @@ Join condition: None
 
 -- !query
 EXPLAIN FORMATTED
+  WITH RECURSIVE r(level) AS (
+    VALUES 0
+    UNION ALL
+    SELECT level + 1 FROM r WHERE level < 9
+  )
+SELECT * FROM r
+-- !query schema
+struct<plan:string>
+-- !query output
+== Physical Plan ==
+* Project (6)
++- UnionLoop (1)
+      :- LocalRelation (2)
+      +- Project (5)
+         +- Filter (4)
+            +- UnionLoopRef (3)
+
+
+(1) UnionLoop
+Loop id: xxxx
+Output [1]: [col1#x]
+Limit: None
+
+(2) LocalRelation
+Arguments: [col1#x]
+
+(3) UnionLoopRef
+Loop id: xxxx
+Output [1]: [col1#x]
+Accumulated: false
+
+(4) Filter
+Arguments: (col1#x < 9)
+
+(5) Project
+Arguments: [(col1#x + 1) AS (level + 1)#x]
+
+(6) Project [codegen id : 1]
+Output [1]: [col1#x AS level#x]
+Input [1]: [col1#x]
+
+
+-- !query
+EXPLAIN FORMATTED
   CREATE VIEW explain_view AS
     SELECT key, val FROM explain_temp1
 -- !query schema
@@ -862,7 +914,7 @@ Execute CreateViewCommand (1)
 Output: []
 
 (2) CreateViewCommand
-Arguments: `spark_catalog`.`default`.`explain_view`, SELECT key, val FROM explain_temp1, false, false, PersistedView, true
+Arguments: `spark_catalog`.`default`.`explain_view`, SELECT key, val FROM explain_temp1, false, false, PersistedView, COMPENSATION, true
 
 (3) LogicalRelation
 Arguments: parquet, [key#x, val#x], `spark_catalog`.`default`.`explain_temp1`, false
@@ -1023,7 +1075,7 @@ EXPLAIN EXTENDED INSERT INTO TABLE explain_temp5 SELECT * FROM explain_temp4
 struct<plan:string>
 -- !query output
 == Parsed Logical Plan ==
-'InsertIntoStatement 'UnresolvedRelation [explain_temp5], [], false, false, false
+'InsertIntoStatement 'UnresolvedRelation [explain_temp5], [__required_write_privileges__=INSERT], false, false, false, false
 +- 'Project [*]
    +- 'UnresolvedRelation [explain_temp4], [], false
 

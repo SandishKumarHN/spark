@@ -37,6 +37,7 @@ DAG visualization, and all stages of the job.
 
 The information that is displayed in this section is
 * User: Current Spark user
+* Started At: The startup time of Spark application
 * Total uptime: Time since Spark application started
 * Scheduling mode: See [job scheduling](job-scheduling.html#configuring-pool-properties)
 * Number of jobs per status: Active, Completed, Failed
@@ -80,15 +81,15 @@ This page displays the details of a specific job identified by its job ID.
 </p>
 
 * List of stages (grouped by state active, pending, completed, skipped, and failed)
-	* Stage ID
-	* Description of the stage
-	* Submitted timestamp
-	* Duration of the stage
-	* Tasks progress bar
-	* Input: Bytes read from storage in this stage
-	* Output: Bytes written in storage in this stage
-	* Shuffle read: Total shuffle bytes and records read, includes both data read locally and data read from remote executors
-	* Shuffle write: Bytes and records written to disk in order to be read by a shuffle in a future stage
+    * Stage ID
+    * Description of the stage
+    * Submitted timestamp
+    * Duration of the stage
+    * Tasks progress bar
+    * Input: Bytes read from storage in this stage
+    * Output: Bytes written in storage in this stage
+    * Shuffle read: Total shuffle bytes and records read, includes both data read locally and data read from remote executors
+    * Shuffle write: Bytes and records written to disk in order to be read by a shuffle in a future stage
 
 <p style="text-align: center;">
   <img src="img/JobPageDetail3.png" title="DAG" alt="DAG">
@@ -380,7 +381,7 @@ operator shows the number of bytes written by a shuffle.
 
 Here is the list of SQL metrics:
 
-<table class="table table-striped">
+<table>
 <thead><tr><th>SQL metrics</th><th>Meaning</th><th>Operators</th></tr></thead>
 <tr><td> <code>number of output rows</code> </td><td> the number of output rows of the operator </td><td> Aggregate operators, Join operators, Sample, Range, Scan operators, Filter, etc.</td></tr>
 <tr><td> <code>data size</code> </td><td> the size of broadcast/shuffled/collected data of the operator </td><td> BroadcastExchange, ShuffleExchange, Subquery </td></tr>
@@ -406,8 +407,8 @@ Here is the list of SQL metrics:
 <tr><td> <code>time to build hash map</code> </td><td> the time spent on building hash map </td><td> ShuffledHashJoin </td></tr>
 <tr><td> <code>task commit time</code> </td><td> the time spent on committing the output of a task after the writes succeed </td><td> any write operation on a file-based table </td></tr>
 <tr><td> <code>job commit time</code> </td><td> the time spent on committing the output of a job after the writes succeed </td><td> any write operation on a file-based table </td></tr>
-<tr><td> <code>data sent to Python workers</code> </td><td> the number of bytes of serialized data sent to the Python workers </td><td> ArrowEvalPython, AggregateInPandas, BatchEvalPython, FlatMapGroupsInPandas, FlatMapsCoGroupsInPandas, FlatMapsCoGroupsInPandasWithState, MapInPandas, PythonMapInArrow, WindowsInPandas </td></tr>
-<tr><td> <code>data returned from Python workers</code> </td><td> the number of bytes of serialized data received back from the Python workers </td><td> ArrowEvalPython, AggregateInPandas, BatchEvalPython, FlatMapGroupsInPandas, FlatMapsCoGroupsInPandas, FlatMapsCoGroupsInPandasWithState, MapInPandas, PythonMapInArrow, WindowsInPandas </td></tr>
+<tr><td> <code>data sent to Python workers</code> </td><td> the number of bytes of serialized data sent to the Python workers </td><td> Python UDFs, Pandas UDFs, Pandas Functions API and Python Data Source </td></tr>
+<tr><td> <code>data returned from Python workers</code> </td><td> the number of bytes of serialized data received back from the Python workers </td><td> Python UDFs, Pandas UDFS, Pandas Functions API and Python Data Source </td></tr>
 </table>
 
 ## Structured Streaming Tab
@@ -479,12 +480,12 @@ The third section has the SQL statistics of the submitted operations.
 * **Duration time** is the difference between close time and start time.
 * **Statement** is the operation being executed.
 * **State** of the process.
-	* _Started_, first state, when the process begins.
-	* _Compiled_, execution plan generated.
-	* _Failed_, final state when the execution failed or finished with error.
-	* _Canceled_, final state when the execution is canceled.
-	* _Finished_ processing and waiting to fetch results.
-	* _Closed_, final state when client closed the statement.
+    * _Started_, first state, when the process begins.
+    * _Compiled_, execution plan generated.
+    * _Failed_, final state when the execution failed or finished with error.
+    * _Canceled_, final state when the execution is canceled.
+    * _Finished_ processing and waiting to fetch results.
+    * _Closed_, final state when client closed the statement.
 * **Detail** of the execution plan with parsed logical plan, analyzed logical plan, optimized logical plan and physical plan or errors in the SQL statement.
 
 <p style="text-align: center;">

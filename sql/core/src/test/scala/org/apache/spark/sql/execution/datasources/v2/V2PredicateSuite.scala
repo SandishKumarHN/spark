@@ -107,7 +107,8 @@ class V2PredicateSuite extends SparkFunSuite {
     val predicate2 = new Predicate("<=>", Array[Expression](ref("a"), LiteralValue(1, IntegerType)))
     assert(predicate1.equals(predicate2))
     assert(predicate1.references.map(_.describe()).toSeq == Seq("a"))
-    assert(predicate1.describe.equals("(a = 1) OR (a IS NULL AND 1 IS NULL)"))
+    assert(predicate1.describe.equals(
+      "((a IS NOT NULL AND 1 IS NOT NULL AND a = 1) OR (a IS NULL AND 1 IS NULL))"))
 
     val v1Filter = EqualNullSafe("a", 1)
     assert(v1Filter.toV2 == predicate1)
@@ -186,7 +187,7 @@ class V2PredicateSuite extends SparkFunSuite {
     var expected = "a IN ("
     for (i <- 0 until 1000) {
       values(i) = LiteralValue(i, IntegerType)
-      expected += i + ", "
+      expected += s"$i, "
     }
     val predicate3 = new Predicate("IN", (ref("a") +: values).toArray[Expression])
     expected = expected.dropRight(2)  // remove the last ", "
@@ -315,7 +316,7 @@ class V2PredicateSuite extends SparkFunSuite {
       Array[Expression](ref("a"), literal))
     assert(predicate1.equals(predicate2))
     assert(predicate1.references.map(_.describe()).toSeq == Seq("a"))
-    assert(predicate1.describe.equals("a LIKE 'str%'"))
+    assert(predicate1.describe.equals(raw"a LIKE 'str%' ESCAPE '\'"))
 
     val v1Filter = StringStartsWith("a", "str")
     assert(v1Filter.toV2.equals(predicate1))
@@ -332,7 +333,7 @@ class V2PredicateSuite extends SparkFunSuite {
       Array[Expression](ref("a"), literal))
     assert(predicate1.equals(predicate2))
     assert(predicate1.references.map(_.describe()).toSeq == Seq("a"))
-    assert(predicate1.describe.equals("a LIKE '%str'"))
+    assert(predicate1.describe.equals(raw"a LIKE '%str' ESCAPE '\'"))
 
     val v1Filter = StringEndsWith("a", "str")
     assert(v1Filter.toV2.equals(predicate1))
@@ -349,7 +350,7 @@ class V2PredicateSuite extends SparkFunSuite {
       Array[Expression](ref("a"), literal))
     assert(predicate1.equals(predicate2))
     assert(predicate1.references.map(_.describe()).toSeq == Seq("a"))
-    assert(predicate1.describe.equals("a LIKE '%str%'"))
+    assert(predicate1.describe.equals(raw"a LIKE '%str%' ESCAPE '\'"))
 
     val v1Filter = StringContains("a", "str")
     assert(v1Filter.toV2.equals(predicate1))

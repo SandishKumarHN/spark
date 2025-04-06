@@ -34,7 +34,7 @@ import org.apache.spark.tags.SlowHiveTest
 @SlowHiveTest
 class PruneHiveTablePartitionsSuite extends PrunePartitionSuiteBase with TestHiveSingleton {
 
-  override def format(): String = "hive"
+  override def format: String = "hive"
 
   object Optimize extends RuleExecutor[LogicalPlan] {
     val batches =
@@ -173,6 +173,16 @@ class PruneHiveTablePartitionsSuite extends PrunePartitionSuiteBase with TestHiv
           val expectedCount = if (enablePruning) 1 else 3
           assert(HiveCatalogMetrics.METRIC_PARTITIONS_FETCHED.getCount == expectedCount)
         }
+      }
+    }
+  }
+
+  test("SPARK-49507: Fix the case issue after enabling metastorePartitionPruningFastFallback") {
+    withTable("t") {
+      withSQLConf(SQLConf.HIVE_METASTORE_PARTITION_PRUNING_FAST_FALLBACK.key -> "true") {
+        sql("CREATE TABLE t(ID BIGINT, DT STRING) USING PARQUET PARTITIONED BY (DT)")
+        sql("INSERT INTO TABLE t SELECT 1, '20240820'")
+        checkAnswer(sql("SELECT * FROM t WHERE dt=20240820"), Row(1, "20240820") :: Nil)
       }
     }
   }

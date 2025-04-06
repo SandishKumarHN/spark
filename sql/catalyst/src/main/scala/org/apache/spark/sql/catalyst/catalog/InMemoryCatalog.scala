@@ -126,7 +126,7 @@ class InMemoryCatalog(
             dbDefinition, e)
       }
       val newDb = dbDefinition.copy(
-        properties = dbDefinition.properties ++ Map(PROP_OWNER -> Utils.getCurrentUserName))
+        properties = dbDefinition.properties ++ Map(PROP_OWNER -> Utils.getCurrentUserName()))
       catalog.put(dbDefinition.name, new DatabaseDesc(newDb))
     }
   }
@@ -509,7 +509,7 @@ class InMemoryCatalog(
         try {
           val fs = tablePath.getFileSystem(hadoopConfig)
           fs.mkdirs(newPartPath)
-          if(!fs.rename(oldPartPath, newPartPath)) {
+          if (!fs.rename(oldPartPath, newPartPath)) {
             throw new IOException(s"Renaming partition path from $oldPartPath to " +
               s"$newPartPath returned false")
           }

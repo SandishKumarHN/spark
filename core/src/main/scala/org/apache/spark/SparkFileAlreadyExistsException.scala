@@ -17,7 +17,7 @@
 
 package org.apache.spark
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import org.apache.hadoop.fs.FileAlreadyExistsException
 
@@ -33,5 +33,5 @@ private[spark] class SparkFileAlreadyExistsException(
 
   override def getMessageParameters: java.util.Map[String, String] = messageParameters.asJava
 
-  override def getErrorClass: String = errorClass
+  override def getCondition: String = errorClass
 }

@@ -24,8 +24,8 @@ import org.scalatest.BeforeAndAfter
 import org.scalatest.matchers.should._
 import org.scalatest.time.{Seconds, Span}
 
-import org.apache.spark.sql.{DataFrame, Dataset, SparkSession}
 import org.apache.spark.sql.catalyst.plans.logical.Range
+import org.apache.spark.sql.classic.{DataFrame, Dataset, SparkSession}
 import org.apache.spark.sql.connector.read.streaming
 import org.apache.spark.sql.connector.read.streaming.SparkDataStream
 import org.apache.spark.sql.functions.{count, timestamp_seconds, window}
@@ -63,11 +63,11 @@ class MicroBatchExecutionSuite extends StreamTest with BeforeAndAfter with Match
           AddData(inputData, 1),
           CheckNewAnswer(1),
           Execute { q =>
-            getListOfFiles(checkpointLocation + "/offsets")
+            getListOfFiles(s"$checkpointLocation/offsets")
               .filter(file => !file.isHidden)
               .map(file => file.getName.toInt)
               .sorted should equal(Array(0, 1))
-            getListOfFiles(checkpointLocation + "/commits")
+            getListOfFiles(s"$checkpointLocation/commits")
               .filter(file => !file.isHidden)
               .map(file => file.getName.toInt)
               .sorted should equal(Array(0, 1))
@@ -81,11 +81,11 @@ class MicroBatchExecutionSuite extends StreamTest with BeforeAndAfter with Match
               q.asInstanceOf[MicroBatchExecution].arePendingAsyncPurge should be(false)
             }
 
-            getListOfFiles(checkpointLocation + "/offsets")
+            getListOfFiles(s"$checkpointLocation/offsets")
               .filter(file => !file.isHidden)
               .map(file => file.getName.toInt)
               .sorted should equal(Array(1, 2, 3))
-            getListOfFiles(checkpointLocation + "/commits")
+            getListOfFiles(s"$checkpointLocation/commits")
               .filter(file => !file.isHidden)
               .map(file => file.getName.toInt)
               .sorted should equal(Array(1, 2, 3))

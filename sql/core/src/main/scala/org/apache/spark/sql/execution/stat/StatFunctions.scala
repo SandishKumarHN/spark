@@ -20,13 +20,14 @@ package org.apache.spark.sql.execution.stat
 import java.util.Locale
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.{Column, DataFrame, Dataset, Row}
-import org.apache.spark.sql.catalyst.expressions.{Cast, ElementAt, EvalMode}
+import org.apache.spark.sql.{Column, Row}
 import org.apache.spark.sql.catalyst.expressions.aggregate._
 import org.apache.spark.sql.catalyst.util.QuantileSummaries
+import org.apache.spark.sql.classic.{DataFrame, Dataset}
 import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
+import org.apache.spark.util.ArrayImplicits._
 
 object StatFunctions extends Logging {
 
@@ -72,7 +73,7 @@ object StatFunctions extends Logging {
       require(field.dataType.isInstanceOf[NumericType],
         s"Quantile calculation for column $colName with data type ${field.dataType}" +
         " is not supported.")
-      Column(Cast(Column(colName).expr, DoubleType))
+      Column(colName).cast(DoubleType)
     }
     val emptySummaries = Array.fill(cols.size)(
       new QuantileSummaries(QuantileSummaries.defaultCompressThreshold, relativeError))
@@ -97,20 +98,31 @@ object StatFunctions extends Logging {
         sum2: Array[QuantileSummaries]): Array[QuantileSummaries] = {
       sum1.zip(sum2).map { case (s1, s2) => s1.compress().merge(s2.compress()) }
     }
-    val summaries = df.select(columns: _*).rdd.treeAggregate(emptySummaries)(apply, merge)
+    val summaries = df.select(columns: _*).materializedRdd
+      .treeAggregate(emptySummaries)(apply, merge)
 
     summaries.map {
       summary => summary.query(probabilities) match {
         case Some(q) => q
         case None => Seq()
       }
-    }
+    }.toImmutableArraySeq
   }
 
   /** Calculate the Pearson Correlation Coefficient for the given columns */
   def pearsonCorrelation(df: DataFrame, cols: Seq[String]): Double = {
+    calculateCorrImpl(df, cols).head().getDouble(0)
+  }
+
+  private[sql] def calculateCorrImpl(
+    df: DataFrame,
+    cols: Seq[String],
+    method: String = "pearson"): DataFrame = {
+    require(method == "pearson", "Currently only the calculation of the Pearson Correlation " +
+      "coefficient is supported.")
     require(cols.length == 2,
       "Currently correlation calculation is supported between two columns.")
+
     val Seq(col1, col2) = cols.map { c =>
       val dataType = df.resolve(c).dataType
       require(dataType.isInstanceOf[NumericType],
@@ -123,7 +135,8 @@ object StatFunctions extends Logging {
     df.select(
       when(isnull(correlation), lit(Double.NaN))
         .otherwise(correlation)
-    ).head.getDouble(0)
+        .as("corr")
+    )
   }
 
   /**
@@ -133,6 +146,10 @@ object StatFunctions extends Logging {
    * @return the covariance of the two columns.
    */
   def calculateCov(df: DataFrame, cols: Seq[String]): Double = {
+    calculateCovImpl(df, cols).head().getDouble(0)
+  }
+
+  private[sql] def calculateCovImpl(df: DataFrame, cols: Seq[String]): DataFrame = {
     require(cols.length == 2,
       "Currently covariance calculation is supported between two columns.")
     val Seq(col1, col2) = cols.map { c =>
@@ -147,7 +164,8 @@ object StatFunctions extends Logging {
     df.select(
       when(isnull(covariance), lit(0.0))
         .otherwise(covariance)
-    ).head.getDouble(0)
+        .as("cov")
+    )
   }
 
   /** Generate a table of frequencies for the elements of two columns. */
@@ -188,7 +206,7 @@ object StatFunctions extends Logging {
         val column = col(field.name)
         var casted = column
         if (field.dataType.isInstanceOf[StringType]) {
-          casted = new Column(Cast(column.expr, DoubleType, evalMode = EvalMode.TRY))
+          casted = column.try_cast(DoubleType)
         }
 
         val percentilesCol = if (percentiles.nonEmpty) {
@@ -231,15 +249,16 @@ object StatFunctions extends Logging {
     }
 
     if (mapColumns.isEmpty) {
-      ds.sparkSession.createDataFrame(selectedStatistics.map(Tuple1.apply))
+      ds.sparkSession.createDataFrame(selectedStatistics.map(Tuple1.apply).toImmutableArraySeq)
         .withColumnRenamed("_1", "summary")
     } else {
       val valueColumns = columnNames.map { columnName =>
-        new Column(ElementAt(col(columnName).expr, col("summary").expr)).as(columnName)
+        element_at(col(columnName), col("summary")).as(columnName)
       }
+      import org.apache.spark.util.ArrayImplicits._
       ds.select(mapColumns: _*)
         .withColumn("summary", explode(lit(selectedStatistics)))
-        .select(Array(col("summary")) ++ valueColumns: _*)
+        .select((Array(col("summary")) ++ valueColumns).toImmutableArraySeq: _*)
     }
   }
 }

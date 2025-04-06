@@ -23,8 +23,8 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent._
 import java.util.concurrent.atomic.AtomicInteger
 
-import scala.collection.JavaConverters._
 import scala.collection.mutable
+import scala.jdk.CollectionConverters._
 
 import com.google.common.io.Files
 import org.apache.commons.io.IOUtils
@@ -132,7 +132,7 @@ class InputStreamsSuite extends TestSuiteBase with BeforeAndAfter {
       val batchDuration = Seconds(2)
       // Create a file that exists before the StreamingContext is created:
       val existingFile = new File(testDir, "0")
-      Files.write("0\n", existingFile, StandardCharsets.UTF_8)
+      Files.asCharSink(existingFile, StandardCharsets.UTF_8).write("0\n")
       assert(existingFile.setLastModified(10000) && existingFile.lastModified === 10000)
 
       // Set up the streaming context and input streams
@@ -191,7 +191,7 @@ class InputStreamsSuite extends TestSuiteBase with BeforeAndAfter {
 
       // Create a file that exists before the StreamingContext is created:
       val existingFile = new File(testDir, "0")
-      Files.write("0\n", existingFile, StandardCharsets.UTF_8)
+      Files.asCharSink(existingFile, StandardCharsets.UTF_8).write("0\n")
       assert(existingFile.setLastModified(10000) && existingFile.lastModified === 10000)
 
       val pathWithWildCard = testDir.toString + "/*/"
@@ -215,7 +215,7 @@ class InputStreamsSuite extends TestSuiteBase with BeforeAndAfter {
 
         def createFileAndAdvanceTime(data: Int, dir: File): Unit = {
           val file = new File(testSubDir1, data.toString)
-          Files.write(data + "\n", file, StandardCharsets.UTF_8)
+          Files.asCharSink(file, StandardCharsets.UTF_8).write(s"$data\n")
           assert(file.setLastModified(clock.getTimeMillis()))
           assert(file.lastModified === clock.getTimeMillis())
           logInfo(s"Created file $file")
@@ -322,7 +322,7 @@ class InputStreamsSuite extends TestSuiteBase with BeforeAndAfter {
     // set up the network stream using the test receiver
     withStreamingContext(new StreamingContext(conf, batchDuration)) { ssc =>
       val networkStream = ssc.receiverStream[Int](testReceiver)
-      val countStream = networkStream.count
+      val countStream = networkStream.count()
 
       val outputStream = new TestOutputStream(countStream, outputQueue)
       outputStream.register()
@@ -457,7 +457,7 @@ class InputStreamsSuite extends TestSuiteBase with BeforeAndAfter {
       }
 
       class TestReceiverInputDStream extends ReceiverInputDStream[String](ssc) {
-        def getReceiver: Receiver[String] = null
+        def getReceiver(): Receiver[String] = null
       }
 
       // Register input streams
@@ -478,7 +478,7 @@ class InputStreamsSuite extends TestSuiteBase with BeforeAndAfter {
       val batchDuration = Seconds(2)
       // Create a file that exists before the StreamingContext is created:
       val existingFile = new File(testDir, "0")
-      Files.write("0\n", existingFile, StandardCharsets.UTF_8)
+      Files.asCharSink(existingFile, StandardCharsets.UTF_8).write("0\n")
       assert(existingFile.setLastModified(10000) && existingFile.lastModified === 10000)
 
       // Set up the streaming context and input streams
@@ -502,7 +502,7 @@ class InputStreamsSuite extends TestSuiteBase with BeforeAndAfter {
         val input = Seq(1, 2, 3, 4, 5)
         input.foreach { i =>
           val file = new File(testDir, i.toString)
-          Files.write(i + "\n", file, StandardCharsets.UTF_8)
+          Files.asCharSink(file, StandardCharsets.UTF_8).write(s"$i\n")
           assert(file.setLastModified(clock.getTimeMillis()))
           assert(file.lastModified === clock.getTimeMillis())
           logInfo("Created file " + file)

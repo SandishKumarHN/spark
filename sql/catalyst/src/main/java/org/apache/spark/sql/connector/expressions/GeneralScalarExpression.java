@@ -18,7 +18,6 @@
 package org.apache.spark.sql.connector.expressions;
 
 import java.util.Arrays;
-import java.util.Objects;
 
 import org.apache.spark.annotation.Evolving;
 import org.apache.spark.sql.connector.expressions.filter.Predicate;
@@ -417,6 +416,18 @@ import org.apache.spark.sql.internal.connector.ExpressionWithToString;
  *    <li>Since version: 3.4.0</li>
  *   </ul>
  *  </li>
+ *  <li>Name: <code>LPAD</code>
+ *   <ul>
+ *    <li>SQL semantic: <code>LPAD(str, len[, pad])</code></li>
+ *    <li>Since version: 4.0.0</li>
+ *   </ul>
+ *  </li>
+ *  <li>Name: <code>RPAD</code>
+ *   <ul>
+ *    <li>SQL semantic: <code>RPAD(str, len[, pad])</code></li>
+ *    <li>Since version: 4.0.0</li>
+ *   </ul>
+ *  </li>
  * </ol>
  * Note: SQL semantic conforms ANSI standard, so some expressions are not supported when ANSI off,
  * including: add, subtract, multiply, divide, remainder, pmod.
@@ -441,12 +452,17 @@ public class GeneralScalarExpression extends ExpressionWithToString {
   public boolean equals(Object o) {
     if (this == o) return true;
     if (o == null || getClass() != o.getClass()) return false;
+
     GeneralScalarExpression that = (GeneralScalarExpression) o;
-    return Objects.equals(name, that.name) && Arrays.equals(children, that.children);
+
+    if (!name.equals(that.name)) return false;
+    return Arrays.equals(children, that.children);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(name, children);
+    int result = name.hashCode();
+    result = 31 * result + Arrays.hashCode(children);
+    return result;
   }
 }

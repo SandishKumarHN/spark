@@ -25,7 +25,8 @@ import org.apache.hadoop.fs.Path
 
 import org.apache.spark.SparkException
 import org.apache.spark.annotation.Since
-import org.apache.spark.internal.Logging
+import org.apache.spark.internal.{Logging, MDC}
+import org.apache.spark.internal.LogKeys.{COUNT, RANGE}
 import org.apache.spark.ml.feature._
 import org.apache.spark.ml.linalg._
 import org.apache.spark.ml.optim.aggregator._
@@ -36,6 +37,7 @@ import org.apache.spark.ml.stat._
 import org.apache.spark.ml.util._
 import org.apache.spark.ml.util.DatasetUtils._
 import org.apache.spark.ml.util.Instrumentation.instrumented
+import org.apache.spark.mllib.util.MLUtils
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
 import org.apache.spark.storage.StorageLevel
@@ -166,6 +168,13 @@ class LinearSVC @Since("2.2.0") (
   @Since("3.1.0")
   def setMaxBlockSizeInMB(value: Double): this.type = set(maxBlockSizeInMB, value)
 
+  private[spark] override def estimateModelSize(dataset: Dataset[_]): Long = {
+    val numFeatures = DatasetUtils.getNumFeatures(dataset, $(featuresCol))
+    var size = this.estimateMatadataSize
+    size += Vectors.getDenseSize(numFeatures) // coefficients
+    size
+  }
+
   @Since("2.2.0")
   override def copy(extra: ParamMap): LinearSVC = defaultCopy(extra)
 
@@ -177,8 +186,8 @@ class LinearSVC @Since("2.2.0") (
       maxBlockSizeInMB)
 
     if (dataset.storageLevel != StorageLevel.NONE) {
-      instr.logWarning(s"Input instances will be standardized, blockified to blocks, and " +
-        s"then cached during training. Be careful of double caching!")
+      instr.logWarning("Input instances will be standardized, blockified to blocks, and " +
+        "then cached during training. Be careful of double caching!")
     }
 
     val instances = dataset.select(
@@ -220,10 +229,11 @@ class LinearSVC @Since("2.2.0") (
     instr.logNumFeatures(numFeatures)
 
     if (numInvalid != 0) {
-      val msg = s"Classification labels should be in [0 to ${numClasses - 1}]. " +
-        s"Found $numInvalid invalid labels."
+      val msg = log"Classification labels should be in " +
+        log"${MDC(RANGE, s"[0 to ${numClasses - 1}]")}. " +
+        log"Found ${MDC(COUNT, numInvalid)} invalid labels."
       instr.logError(msg)
-      throw new SparkException(msg)
+      throw new SparkException(msg.message)
     }
 
     val featuresStd = summarizer.std.toArray
@@ -249,16 +259,14 @@ class LinearSVC @Since("2.2.0") (
         regularization, optimizer)
 
     if (rawCoefficients == null) {
-      val msg = s"${optimizer.getClass.getName} failed."
-      instr.logError(msg)
-      throw new SparkException(msg)
+      MLUtils.optimizerFailed(instr, optimizer.getClass)
     }
 
     val coefficientArray = Array.tabulate(numFeatures) { i =>
       if (featuresStd(i) != 0.0) rawCoefficients(i) / featuresStd(i) else 0.0
     }
     val intercept = if ($(fitIntercept)) rawCoefficients.last else 0.0
-    createModel(dataset, Vectors.dense(coefficientArray), intercept, objectiveHistory)
+    createModel(dataset, Vectors.dense(coefficientArray).compressed, intercept, objectiveHistory)
   }
 
   private def createModel(
@@ -342,7 +350,7 @@ class LinearSVC @Since("2.2.0") (
       val adapt = BLAS.javaBLAS.ddot(numFeatures, solution, 1, scaledMean, 1)
       solution(numFeatures) -= adapt
     }
-    (solution, arrayBuilder.result)
+    (solution, arrayBuilder.result())
   }
 }
 
@@ -363,6 +371,9 @@ class LinearSVCModel private[classification] (
     @Since("2.2.0") val intercept: Double)
   extends ClassificationModel[Vector, LinearSVCModel]
   with LinearSVCParams with MLWritable with HasTrainingSummary[LinearSVCTrainingSummary] {
+
+  // For ml connect only
+  private[ml] def this() = this("", Vectors.empty, Double.NaN)
 
   @Since("2.2.0")
   override val numClasses: Int = 2
@@ -417,6 +428,14 @@ class LinearSVCModel private[classification] (
     copyValues(new LinearSVCModel(uid, coefficients, intercept), extra).setParent(parent)
   }
 
+  private[spark] override def estimatedSize: Long = {
+    var size = this.estimateMatadataSize
+    if (this.coefficients != null) {
+      size += this.coefficients.getSizeInBytes
+    }
+    size
+  }
+
   @Since("2.2.0")
   override def write: MLWriter = new LinearSVCModel.LinearSVCWriter(this)
 
@@ -445,10 +464,10 @@ object LinearSVCModel extends MLReadable[LinearSVCModel] {
 
     override protected def saveImpl(path: String): Unit = {
       // Save metadata and Params
-      DefaultParamsWriter.saveMetadata(instance, path, sc)
+      DefaultParamsWriter.saveMetadata(instance, path, sparkSession)
       val data = Data(instance.coefficients, instance.intercept)
       val dataPath = new Path(path, "data").toString
-      sparkSession.createDataFrame(Seq(data)).repartition(1).write.parquet(dataPath)
+      sparkSession.createDataFrame(Seq(data)).write.parquet(dataPath)
     }
   }
 
@@ -458,7 +477,7 @@ object LinearSVCModel extends MLReadable[LinearSVCModel] {
     private val className = classOf[LinearSVCModel].getName
 
     override def load(path: String): LinearSVCModel = {
-      val metadata = DefaultParamsReader.loadMetadata(path, sc, className)
+      val metadata = DefaultParamsReader.loadMetadata(path, sparkSession, className)
       val dataPath = new Path(path, "data").toString
       val data = sparkSession.read.format("parquet").load(dataPath)
       val Row(coefficients: Vector, intercept: Double) =

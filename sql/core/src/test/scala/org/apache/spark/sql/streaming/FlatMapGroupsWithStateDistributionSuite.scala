@@ -26,8 +26,10 @@ import org.apache.spark.sql.execution.streaming.{FlatMapGroupsWithStateExec, Mem
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.streaming.GroupStateTimeout.ProcessingTimeTimeout
 import org.apache.spark.sql.streaming.util.{StatefulOpClusteredDistributionTestHelper, StreamManualClock}
+import org.apache.spark.tags.SlowSQLTest
 import org.apache.spark.util.Utils
 
+@SlowSQLTest
 class FlatMapGroupsWithStateDistributionSuite extends StreamTest
   with StatefulOpClusteredDistributionTestHelper {
 
@@ -133,8 +135,15 @@ class FlatMapGroupsWithStateDistributionSuite extends StreamTest
         assert(flatMapGroupsWithStateExecs.length === 1)
         assert(requireStatefulOpClusteredDistribution(
           flatMapGroupsWithStateExecs.head, Seq(Seq("_1", "_2"), Seq("_1", "_2")), numPartitions))
-        assert(hasDesiredHashPartitioningInChildren(
-          flatMapGroupsWithStateExecs.head, Seq(Seq("_1", "_2"), Seq("_1", "_2")), numPartitions))
+        if (flatMapGroupsWithStateExecs.head.hasInitialState) {
+          assert(hasDesiredHashPartitioningInChildren(
+            flatMapGroupsWithStateExecs.head.children, Seq(Seq("_1", "_2"), Seq("_1", "_2")),
+            numPartitions))
+        } else {
+          assert(hasDesiredHashPartitioningInChildren(
+            Seq(flatMapGroupsWithStateExecs.head.left), Seq(Seq("_1", "_2"), Seq("_1", "_2")),
+            numPartitions))
+        }
       }
     )
   }
@@ -234,8 +243,15 @@ class FlatMapGroupsWithStateDistributionSuite extends StreamTest
         assert(flatMapGroupsWithStateExecs.length === 1)
         assert(requireClusteredDistribution(flatMapGroupsWithStateExecs.head,
           Seq(Seq("_1", "_2"), Seq("_1", "_2")), Some(numPartitions)))
-        assert(hasDesiredHashPartitioningInChildren(
-          flatMapGroupsWithStateExecs.head, Seq(Seq("_1", "_2"), Seq("_1", "_2")), numPartitions))
+        if (flatMapGroupsWithStateExecs.head.hasInitialState) {
+          assert(hasDesiredHashPartitioningInChildren(
+            flatMapGroupsWithStateExecs.head.children, Seq(Seq("_1", "_2"), Seq("_1", "_2")),
+            numPartitions))
+        } else {
+          assert(hasDesiredHashPartitioningInChildren(
+            Seq(flatMapGroupsWithStateExecs.head.left), Seq(Seq("_1", "_2"), Seq("_1", "_2")),
+            numPartitions))
+        }
       }
     )
   }
@@ -326,8 +342,15 @@ class FlatMapGroupsWithStateDistributionSuite extends StreamTest
         assert(flatMapGroupsWithStateExecs.length === 1)
         assert(requireClusteredDistribution(flatMapGroupsWithStateExecs.head,
           Seq(Seq("_1", "_2"), Seq("_1", "_2")), Some(numPartitions)))
-        assert(hasDesiredHashPartitioningInChildren(
-          flatMapGroupsWithStateExecs.head, Seq(Seq("_1", "_2"), Seq("_1", "_2")), numPartitions))
+        if (flatMapGroupsWithStateExecs.head.hasInitialState) {
+          assert(hasDesiredHashPartitioningInChildren(
+            flatMapGroupsWithStateExecs.head.children, Seq(Seq("_1", "_2"), Seq("_1", "_2")),
+            numPartitions))
+        } else {
+          assert(hasDesiredHashPartitioningInChildren(
+            Seq(flatMapGroupsWithStateExecs.head.left), Seq(Seq("_1", "_2"), Seq("_1", "_2")),
+            numPartitions))
+        }
       }
     )
   }
@@ -447,8 +470,15 @@ class FlatMapGroupsWithStateDistributionSuite extends StreamTest
         assert(flatMapGroupsWithStateExecs.length === 1)
         assert(requireClusteredDistribution(flatMapGroupsWithStateExecs.head,
           Seq(Seq("_1", "_2"), Seq("_1", "_2")), Some(numPartitions)))
-        assert(hasDesiredHashPartitioningInChildren(
-          flatMapGroupsWithStateExecs.head, Seq(Seq("_1", "_2"), Seq("_1", "_2")), numPartitions))
+        if (flatMapGroupsWithStateExecs.head.hasInitialState) {
+          assert(hasDesiredHashPartitioningInChildren(
+            flatMapGroupsWithStateExecs.head.children, Seq(Seq("_1", "_2"), Seq("_1", "_2")),
+            numPartitions))
+        } else {
+          assert(hasDesiredHashPartitioningInChildren(
+            Seq(flatMapGroupsWithStateExecs.head.left), Seq(Seq("_1", "_2"), Seq("_1", "_2")),
+            numPartitions))
+        }
       }
     )
   }

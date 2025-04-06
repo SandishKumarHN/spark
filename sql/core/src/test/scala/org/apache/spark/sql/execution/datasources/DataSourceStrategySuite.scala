@@ -324,4 +324,37 @@ class DataSourceStrategySuite extends PlanTest with SharedSparkSession {
       DataSourceStrategy.translateFilter(catalystFilter, true)
     }
   }
+
+  test("SPARK-41636: selectFilters returns predicates in deterministic order") {
+
+    val idColAttribute = AttributeReference("id", IntegerType)()
+    val predicates = Seq(EqualTo(idColAttribute, 1), EqualTo(idColAttribute, 2),
+      EqualTo(idColAttribute, 3), EqualTo(idColAttribute, 4), EqualTo(idColAttribute, 5),
+      EqualTo(idColAttribute, 6))
+
+    val (unhandledPredicates, pushedFilters, handledFilters) =
+      DataSourceStrategy.selectFilters(FakeRelation(), predicates)
+    assert(unhandledPredicates.equals(predicates))
+    assert(pushedFilters.zipWithIndex.forall { case (f, i) =>
+      f.equals(sources.EqualTo("id", i + 1))
+    })
+    assert(handledFilters.isEmpty)
+  }
+
+  test("SPARK-48431: Push filters on columns with UTF8_BINARY collation") {
+    val colAttr = $"col".string("UTF8_BINARY")
+    testTranslateFilter(EqualTo(colAttr, Literal("value")), Some(sources.EqualTo("col", "value")))
+    testTranslateFilter(Not(EqualTo(colAttr, Literal("value"))),
+      Some(sources.Not(sources.EqualTo("col", "value"))))
+    testTranslateFilter(LessThan(colAttr, Literal("value")),
+      Some(sources.LessThan("col", "value")))
+    testTranslateFilter(LessThan(colAttr, Literal("value")), Some(sources.LessThan("col", "value")))
+    testTranslateFilter(LessThanOrEqual(colAttr, Literal("value")),
+      Some(sources.LessThanOrEqual("col", "value")))
+    testTranslateFilter(GreaterThan(colAttr, Literal("value")),
+      Some(sources.GreaterThan("col", "value")))
+    testTranslateFilter(GreaterThanOrEqual(colAttr, Literal("value")),
+      Some(sources.GreaterThanOrEqual("col", "value")))
+    testTranslateFilter(IsNotNull(colAttr), Some(sources.IsNotNull("col")))
+  }
 }

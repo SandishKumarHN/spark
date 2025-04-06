@@ -19,14 +19,14 @@ package org.apache.spark.sql.catalyst.util
 
 import java.sql.{Date, Timestamp}
 import java.text.SimpleDateFormat
-import java.time.{Instant, LocalDate, LocalDateTime, LocalTime, ZoneId}
+import java.time.{DateTimeException, Instant, LocalDate, LocalDateTime, LocalTime, ZoneId}
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 import org.scalatest.matchers.must.Matchers
 import org.scalatest.matchers.should.Matchers._
 
-import org.apache.spark.SparkFunSuite
+import org.apache.spark.{SparkDateTimeException, SparkFunSuite, SparkIllegalArgumentException}
 import org.apache.spark.sql.catalyst.plans.SQLHelper
 import org.apache.spark.sql.catalyst.util.DateTimeConstants._
 import org.apache.spark.sql.catalyst.util.DateTimeTestUtils._
@@ -127,6 +127,27 @@ class DateTimeUtilsSuite extends SparkFunSuite with Matchers with SQLHelper {
     stringToDate(UTF8String.fromString(s))
   }
 
+  test("SPARK-32559: string to date trim Control Characters") {
+    val expected = days(2015, 3, 18)
+    permuteWithWhitespaceAndControl(
+      "2015-03-18", "2015-03-18T123321", " 2015-03-18 123321", "+2015-03-18"
+    ).foreach { s =>
+      assert(toDate(s).get === expected)
+    }
+
+    permuteWithWhitespaceAndControl(
+      "INVALID_INPUT", " ", "1999-08-", "2015-03-18\u0003123321", "2015-03-18Q123321"
+    ).foreach { s =>
+      assert(toDate(s).isEmpty)
+    }
+  }
+
+  private def permuteWithWhitespaceAndControl(values: String*): Seq[String] =
+    values.flatMap { input =>
+      Seq(input, "\u0003", "\u0003", " ", " ")
+        .permutations.map(_.mkString)
+    }
+
   test("string to date") {
     assert(toDate("2015-01-28").get === days(2015, 1, 28))
     assert(toDate("2015").get === days(2015, 1, 1))
@@ -150,6 +171,10 @@ class DateTimeUtilsSuite extends SparkFunSuite with Matchers with SQLHelper {
     assert(toDate("1999-08-").isEmpty)
     assert(toDate("").isEmpty)
     assert(toDate("   ").isEmpty)
+    assert(toDate("+").isEmpty)
+    assert(toDate("-").isEmpty)
+    assert(toDate("xxx2015-01-28").isEmpty)
+    assert(toDate("--2015-01-28").isEmpty)
   }
 
   test("SPARK-35780: support full range of date string") {
@@ -315,6 +340,20 @@ class DateTimeUtilsSuite extends SparkFunSuite with Matchers with SQLHelper {
       zoneId = getZoneId("Europe/Moscow")
       expected = Option(date(2015, 3, 18, 12, 3, 17, 123456, zid = zoneId))
       checkStringToTimestamp("2015-03-18T12:03:17.123456 Europe/Moscow", expected)
+
+      // Check whitespace and control character permutations
+      expected = Option(date(2015, 3, 18, 12, 3, 17, zid = zid))
+      permuteWithWhitespaceAndControl(
+        "2015-03-18 12:03:17", "2015-03-18T12:03:17"
+      ).foreach { s =>
+        checkStringToTimestamp(s, expected)
+      }
+
+      permuteWithWhitespaceAndControl(
+        "INVALID_INPUT", "\t", "", "2015-03-18\u000312:03:17", "2015-03-18 12:", "2015-03-18 123"
+      ).foreach { s =>
+        checkStringToTimestamp(s, None)
+      }
     }
   }
 
@@ -500,7 +539,10 @@ class DateTimeUtilsSuite extends SparkFunSuite with Matchers with SQLHelper {
     assert(dateAddInterval(input, new CalendarInterval(36, 0, 0)) === days(2000, 2, 28))
     assert(dateAddInterval(input, new CalendarInterval(36, 47, 0)) === days(2000, 4, 15))
     assert(dateAddInterval(input, new CalendarInterval(-13, 0, 0)) === days(1996, 1, 28))
-    intercept[IllegalArgumentException](dateAddInterval(input, new CalendarInterval(36, 47, 1)))
+    checkError(
+      exception = intercept[SparkIllegalArgumentException](
+        dateAddInterval(input, new CalendarInterval(36, 47, 1))),
+      condition = "INVALID_INTERVAL_WITH_MICROSECONDS_ADDITION")
   }
 
   test("timestamp add interval") {
@@ -721,10 +763,10 @@ class DateTimeUtilsSuite extends SparkFunSuite with Matchers with SQLHelper {
   }
 
   test("SPARK-35664: microseconds to LocalDateTime") {
-    assert(microsToLocalDateTime(0) ==  LocalDateTime.parse("1970-01-01T00:00:00"))
-    assert(microsToLocalDateTime(100) ==  LocalDateTime.parse("1970-01-01T00:00:00.0001"))
-    assert(microsToLocalDateTime(100000000) ==  LocalDateTime.parse("1970-01-01T00:01:40"))
-    assert(microsToLocalDateTime(100000000000L) ==  LocalDateTime.parse("1970-01-02T03:46:40"))
+    assert(microsToLocalDateTime(0) == LocalDateTime.parse("1970-01-01T00:00:00"))
+    assert(microsToLocalDateTime(100) == LocalDateTime.parse("1970-01-01T00:00:00.0001"))
+    assert(microsToLocalDateTime(100000000) == LocalDateTime.parse("1970-01-01T00:01:40"))
+    assert(microsToLocalDateTime(100000000000L) == LocalDateTime.parse("1970-01-02T03:46:40"))
     assert(microsToLocalDateTime(253402300799999999L) ==
       LocalDateTime.parse("9999-12-31T23:59:59.999999"))
     assert(microsToLocalDateTime(Long.MinValue) ==
@@ -847,8 +889,18 @@ class DateTimeUtilsSuite extends SparkFunSuite with Matchers with SQLHelper {
   test("parsing day of week") {
     assert(getDayOfWeekFromString(UTF8String.fromString("THU")) == 0)
     assert(getDayOfWeekFromString(UTF8String.fromString("MONDAY")) == 4)
-    intercept[IllegalArgumentException](getDayOfWeekFromString(UTF8String.fromString("xx")))
-    intercept[IllegalArgumentException](getDayOfWeekFromString(UTF8String.fromString("\"quote")))
+    checkError(
+      exception = intercept[SparkIllegalArgumentException] {
+        getDayOfWeekFromString(UTF8String.fromString("xx"))
+      },
+      condition = "ILLEGAL_DAY_OF_WEEK",
+      parameters = Map("string" -> "xx"))
+    checkError(
+      exception = intercept[SparkIllegalArgumentException] {
+        getDayOfWeekFromString(UTF8String.fromString("\"quote"))
+      },
+      condition = "ILLEGAL_DAY_OF_WEEK",
+      parameters = Map("string" -> "\"quote"))
   }
 
   test("SPARK-34761: timestamp add day-time interval") {
@@ -984,10 +1036,15 @@ class DateTimeUtilsSuite extends SparkFunSuite with Matchers with SQLHelper {
         date(1, 1, 1, 0, 0, 0, 1, zid))
     }
 
-    val e = intercept[IllegalStateException] {
-      timestampAdd("SECS", 1, date(1969, 1, 1, 0, 0, 0, 1, getZoneId("UTC")), getZoneId("UTC"))
-    }
-    assert(e.getMessage === "Got the unexpected unit 'SECS'.")
+    checkError(
+      exception = intercept[SparkIllegalArgumentException] {
+        timestampAdd("SECS", 1, date(1969, 1, 1, 0, 0, 0, 1, getZoneId("UTC")), getZoneId("UTC"))
+      },
+      condition = "INVALID_PARAMETER_VALUE.DATETIME_UNIT",
+      parameters = Map(
+        "functionName" -> "`TIMESTAMPADD`",
+        "parameter" -> "`unit`",
+        "invalidValue" -> "'SECS'"))
   }
 
   test("SPARK-38284: difference between two timestamps in units") {
@@ -1034,13 +1091,79 @@ class DateTimeUtilsSuite extends SparkFunSuite with Matchers with SQLHelper {
         zid) === -9998)
     }
 
-    val e = intercept[IllegalStateException] {
-      timestampDiff(
-        "SECS",
-        date(1969, 1, 1, 0, 0, 0, 1, getZoneId("UTC")),
-        date(2022, 1, 1, 0, 0, 0, 1, getZoneId("UTC")),
-        getZoneId("UTC"))
+    checkError(
+      exception = intercept[SparkIllegalArgumentException] {
+        timestampDiff(
+          "SECS",
+          date(1969, 1, 1, 0, 0, 0, 1, getZoneId("UTC")),
+          date(2022, 1, 1, 0, 0, 0, 1, getZoneId("UTC")),
+          getZoneId("UTC"))
+      },
+      condition = "INVALID_PARAMETER_VALUE.DATETIME_UNIT",
+      parameters =
+        Map("functionName" -> "`TIMESTAMPDIFF`",
+          "parameter" -> "`unit`",
+          "invalidValue" -> "'SECS'"))
+  }
+
+  test("localTimeToMicros and microsToLocalTime") {
+    assert(microsToLocalTime(0) === LocalTime.of(0, 0))
+    assert(localTimeToMicros(LocalTime.of(0, 0)) === 0)
+
+    assert(localTimeToMicros(microsToLocalTime(123456789)) === 123456789)
+
+    assert(localTimeToMicros(LocalTime.parse("23:59:59.999999")) === (24L * 60 * 60 * 1000000 - 1))
+    assert(microsToLocalTime(24L * 60 * 60 * 1000000 - 1) === LocalTime.of(23, 59, 59, 999999000))
+
+    Seq(-1, 24L * 60 * 60 * 1000000).foreach { invalidMicros =>
+      val msg = intercept[DateTimeException] {
+        microsToLocalTime(invalidMicros)
+      }.getMessage
+      assert(msg.contains("Invalid value"))
     }
-    assert(e.getMessage === "Got the unexpected unit 'SECS'.")
+    val msg = intercept[ArithmeticException] {
+      microsToLocalTime(Long.MaxValue)
+    }.getMessage
+    assert(msg == "long overflow")
+  }
+
+  test("stringToTime") {
+    def checkStringToTime(str: String, expected: Option[Long]): Unit = {
+      assert(stringToTime(UTF8String.fromString(str)) === expected)
+    }
+
+    checkStringToTime("00:00", Some(localTime()))
+    checkStringToTime("00:00:00", Some(localTime()))
+    checkStringToTime("00:00:00.1", Some(localTime(micros = 100000)))
+    checkStringToTime("00:00:59.01", Some(localTime(sec = 59, micros = 10000)))
+    checkStringToTime("00:59:00.001", Some(localTime(minute = 59, micros = 1000)))
+    checkStringToTime("23:00:00.0001", Some(localTime(hour = 23, micros = 100)))
+    checkStringToTime("23:59:00.00001", Some(localTime(hour = 23, minute = 59, micros = 10)))
+    checkStringToTime("23:59:59.000001",
+      Some(localTime(hour = 23, minute = 59, sec = 59, micros = 1)))
+    checkStringToTime("23:59:59.999999",
+      Some(localTime(hour = 23, minute = 59, sec = 59, micros = 999999)))
+
+    checkStringToTime("1:2:3.0", Some(localTime(hour = 1, minute = 2, sec = 3)))
+    checkStringToTime("T1:02:3.04", Some(localTime(hour = 1, minute = 2, sec = 3, micros = 40000)))
+
+    // Negative tests
+    Seq("2025-03-09 00:00:00", "00", "00:01:02 UTC").foreach { invalidTime =>
+      checkStringToTime(invalidTime, None)
+    }
+  }
+
+  test("stringToTimeAnsi") {
+    Seq("2025-03-09T00:00:00", "012", "00:01:02Z").foreach { invalidTime =>
+      checkError(
+        exception = intercept[SparkDateTimeException] {
+          stringToTimeAnsi(UTF8String.fromString(invalidTime))
+        },
+        condition = "CAST_INVALID_INPUT",
+        parameters = Map(
+          "expression" -> s"'$invalidTime'",
+          "sourceType" -> "\"STRING\"",
+          "targetType" -> "\"TIME(6)\""))
+    }
   }
 }

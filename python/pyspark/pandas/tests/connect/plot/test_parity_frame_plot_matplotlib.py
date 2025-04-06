@@ -24,13 +24,7 @@ from pyspark.testing.pandasutils import PandasOnSparkTestUtils, TestUtils
 class DataFramePlotMatplotlibParityTests(
     DataFramePlotMatplotlibTestsMixin, PandasOnSparkTestUtils, TestUtils, ReusedConnectTestCase
 ):
-    @unittest.skip("Fails in Spark Connect, should enable.")
-    def test_hist_plot(self):
-        super().test_hist_plot()
-
-    @unittest.skip("Fails in Spark Connect, should enable.")
-    def test_kde_plot(self):
-        super().test_kde_plot()
+    pass
 
 
 if __name__ == "__main__":

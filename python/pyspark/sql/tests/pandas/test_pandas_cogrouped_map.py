@@ -19,7 +19,15 @@ import unittest
 from typing import cast
 
 from pyspark.sql.functions import array, explode, col, lit, udf, pandas_udf, sum
-from pyspark.sql.types import DoubleType, StructType, StructField, Row
+from pyspark.sql.types import (
+    ArrayType,
+    DoubleType,
+    LongType,
+    StructType,
+    StructField,
+    YearMonthIntervalType,
+    Row,
+)
 from pyspark.sql.window import Window
 from pyspark.errors import IllegalArgumentException, PythonException
 from pyspark.testing.sqlutils import (
@@ -29,7 +37,6 @@ from pyspark.testing.sqlutils import (
     pandas_requirement_message,
     pyarrow_requirement_message,
 )
-from pyspark.testing.utils import QuietTest
 
 if have_pandas:
     import pandas as pd
@@ -48,7 +55,6 @@ class CogroupedApplyInPandasTestsMixin:
     def data1(self):
         return (
             self.spark.range(10)
-            .toDF("id")
             .withColumn("ks", array([lit(i) for i in range(20, 30)]))
             .withColumn("k", explode(col("ks")))
             .withColumn("v", col("k") * 10)
@@ -59,7 +65,6 @@ class CogroupedApplyInPandasTestsMixin:
     def data2(self):
         return (
             self.spark.range(10)
-            .toDF("id")
             .withColumn("ks", array([lit(i) for i in range(20, 30)]))
             .withColumn("k", explode(col("ks")))
             .withColumn("v2", col("k") * 100)
@@ -133,27 +138,34 @@ class CogroupedApplyInPandasTestsMixin:
         self._test_merge(self.data1, self.data2, by=[])
 
     def test_different_group_key_cardinality(self):
+        with self.quiet():
+            self.check_different_group_key_cardinality()
+
+    def check_different_group_key_cardinality(self):
         left = self.data1
         right = self.data2
 
         def merge_pandas(lft, _):
             return lft
 
-        with QuietTest(self.sc):
-            with self.assertRaisesRegex(
-                IllegalArgumentException,
-                "requirement failed: Cogroup keys must have same size: 2 != 1",
-            ):
-                (left.groupby("id", "k").cogroup(right.groupby("id"))).applyInPandas(
-                    merge_pandas, "id long, k int, v int"
-                )
+        with self.assertRaisesRegex(
+            IllegalArgumentException,
+            "requirement failed: Cogroup keys must have same size: 2 != 1",
+        ):
+            (left.groupby("id", "k").cogroup(right.groupby("id"))).applyInPandas(
+                merge_pandas, "id long, k int, v int"
+            ).count()
 
     def test_apply_in_pandas_not_returning_pandas_dataframe(self):
+        with self.quiet():
+            self.check_apply_in_pandas_not_returning_pandas_dataframe()
+
+    def check_apply_in_pandas_not_returning_pandas_dataframe(self):
         self._test_merge_error(
             fn=lambda lft, rgt: lft.size + rgt.size,
-            error_class=PythonException,
+            errorClass=PythonException,
             error_message_regex="Return type of the user-defined function "
-            "should be pandas.DataFrame, but is <class 'numpy.int64'>",
+            "should be pandas.DataFrame, but is int",
         )
 
     def test_apply_in_pandas_returning_column_names(self):
@@ -178,6 +190,10 @@ class CogroupedApplyInPandasTestsMixin:
         self._test_merge(fn=merge_pandas)
 
     def test_apply_in_pandas_returning_wrong_column_names(self):
+        with self.quiet():
+            self.check_apply_in_pandas_returning_wrong_column_names()
+
+    def check_apply_in_pandas_returning_wrong_column_names(self):
         def merge_pandas(lft, rgt):
             if 0 in lft["id"] and lft["id"][0] % 2 == 0:
                 lft["add"] = 0
@@ -187,12 +203,16 @@ class CogroupedApplyInPandasTestsMixin:
 
         self._test_merge_error(
             fn=merge_pandas,
-            error_class=PythonException,
+            errorClass=PythonException,
             error_message_regex="Column names of the returned pandas.DataFrame "
             "do not match specified schema. Unexpected: add, more.\n",
         )
 
     def test_apply_in_pandas_returning_no_column_names_and_wrong_amount(self):
+        with self.quiet():
+            self.check_apply_in_pandas_returning_no_column_names_and_wrong_amount()
+
+    def check_apply_in_pandas_returning_no_column_names_and_wrong_amount(self):
         def merge_pandas(lft, rgt):
             if 0 in lft["id"] and lft["id"][0] % 2 == 0:
                 lft[3] = 0
@@ -204,7 +224,7 @@ class CogroupedApplyInPandasTestsMixin:
 
         self._test_merge_error(
             fn=merge_pandas,
-            error_class=PythonException,
+            errorClass=PythonException,
             error_message_regex="Number of columns of the returned pandas.DataFrame "
             "doesn't match specified schema. Expected: 4 Actual: 6\n",
         )
@@ -220,10 +240,14 @@ class CogroupedApplyInPandasTestsMixin:
         self._test_merge_empty(fn=merge_pandas)
 
     def test_apply_in_pandas_returning_incompatible_type(self):
+        with self.quiet():
+            self.check_apply_in_pandas_returning_incompatible_type()
+
+    def check_apply_in_pandas_returning_incompatible_type(self):
         for safely in [True, False]:
             with self.subTest(convertToArrowArraySafely=safely), self.sql_conf(
                 {"spark.sql.execution.pandas.convertToArrowArraySafely": safely}
-            ), QuietTest(self.sc):
+            ):
                 # sometimes we see ValueErrors
                 with self.subTest(convert="string to double"):
                     expected = (
@@ -240,7 +264,7 @@ class CogroupedApplyInPandasTestsMixin:
                     self._test_merge_error(
                         fn=lambda lft, rgt: pd.DataFrame({"id": [1], "k": ["2.0"]}),
                         output_schema="id long, k double",
-                        error_class=PythonException,
+                        errorClass=PythonException,
                         error_message_regex=expected,
                     )
 
@@ -253,7 +277,7 @@ class CogroupedApplyInPandasTestsMixin:
                     self._test_merge_error(
                         fn=lambda lft, rgt: pd.DataFrame({"id": [1], "k": [2.0]}),
                         output_schema="id long, k string",
-                        error_class=PythonException,
+                        errorClass=PythonException,
                         error_message_regex=expected,
                     )
 
@@ -307,19 +331,29 @@ class CogroupedApplyInPandasTestsMixin:
         assert_frame_equal(expected, result)
 
     def test_wrong_return_type(self):
+        with self.quiet():
+            self.check_wrong_return_type()
+
+    def check_wrong_return_type(self):
         # Test that we get a sensible exception invalid values passed to apply
         self._test_merge_error(
             fn=lambda l, r: l,
-            output_schema="id long, v array<timestamp>",
-            error_class=NotImplementedError,
-            error_message_regex="Invalid return type.*ArrayType.*TimestampType",
+            output_schema=(
+                StructType().add("id", LongType()).add("v", ArrayType(YearMonthIntervalType()))
+            ),
+            errorClass=NotImplementedError,
+            error_message_regex="Invalid return type.*ArrayType.*YearMonthIntervalType",
         )
 
     def test_wrong_args(self):
+        with self.quiet():
+            self.check_wrong_args()
+
+    def check_wrong_args(self):
         self.__test_merge_error(
             fn=lambda: 1,
             output_schema=StructType([StructField("d", DoubleType())]),
-            error_class=ValueError,
+            errorClass=ValueError,
             error_message_regex="Invalid function",
         )
 
@@ -410,6 +444,41 @@ class CogroupedApplyInPandasTestsMixin:
         actual = df.orderBy("id", "day").take(days)
         self.assertEqual(actual, [Row(0, day, vals, vals) for day in range(days)])
 
+    def test_with_local_data(self):
+        df1 = self.spark.createDataFrame(
+            [(1, 1.0, "a"), (2, 2.0, "b"), (1, 3.0, "c"), (2, 4.0, "d")], ("id", "v1", "v2")
+        )
+        df2 = self.spark.createDataFrame([(1, "x"), (2, "y"), (1, "z")], ("id", "v3"))
+
+        def summarize(left, right):
+            return pd.DataFrame(
+                {
+                    "left_rows": [len(left)],
+                    "left_columns": [len(left.columns)],
+                    "right_rows": [len(right)],
+                    "right_columns": [len(right.columns)],
+                }
+            )
+
+        df = (
+            df1.groupby("id")
+            .cogroup(df2.groupby("id"))
+            .applyInPandas(
+                summarize,
+                schema="left_rows long, left_columns long, right_rows long, right_columns long",
+            )
+        )
+
+        self.assertEqual(
+            df._show_string(),
+            "+---------+------------+----------+-------------+\n"
+            "|left_rows|left_columns|right_rows|right_columns|\n"
+            "+---------+------------+----------+-------------+\n"
+            "|        2|           3|         2|            2|\n"
+            "|        2|           3|         1|            2|\n"
+            "+---------+------------+----------+-------------+\n",
+        )
+
     @staticmethod
     def _test_with_key(left, right, isLeft):
         def right_assign_key(key, lft, rgt):
@@ -489,7 +558,7 @@ class CogroupedApplyInPandasTestsMixin:
 
     def _test_merge_error(
         self,
-        error_class,
+        errorClass,
         error_message_regex,
         left=None,
         right=None,
@@ -508,7 +577,7 @@ class CogroupedApplyInPandasTestsMixin:
                 by=by,
                 fn=fn,
                 output_schema=output_schema,
-                error_class=error_class,
+                errorClass=errorClass,
                 error_message_regex=error_message_regex,
             )
         with self.subTest("with key"):
@@ -518,13 +587,13 @@ class CogroupedApplyInPandasTestsMixin:
                 by=by,
                 fn=fn_with_key,
                 output_schema=output_schema,
-                error_class=error_class,
+                errorClass=errorClass,
                 error_message_regex=error_message_regex,
             )
 
     def __test_merge_error(
         self,
-        error_class,
+        errorClass,
         error_message_regex,
         left=None,
         right=None,
@@ -533,9 +602,8 @@ class CogroupedApplyInPandasTestsMixin:
         output_schema="id long, k int, v int, v2 int",
     ):
         # Test fn as is, cf. _test_merge_error
-        with QuietTest(self.sc):
-            with self.assertRaisesRegex(error_class, error_message_regex):
-                self.__test_merge(left, right, by, fn, output_schema)
+        with self.assertRaisesRegex(errorClass, error_message_regex):
+            self.__test_merge(left, right, by, fn, output_schema)
 
 
 class CogroupedApplyInPandasTests(CogroupedApplyInPandasTestsMixin, ReusedSQLTestCase):

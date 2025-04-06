@@ -29,6 +29,7 @@ import com.google.common.io.Files
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.hadoop.io.{BytesWritable, LongWritable, Text}
+import org.apache.hadoop.ipc.{CallerContext => HadoopCallerContext}
 import org.apache.hadoop.mapred.TextInputFormat
 import org.apache.hadoop.mapreduce.lib.input.{TextInputFormat => NewTextInputFormat}
 import org.apache.logging.log4j.{Level, LogManager}
@@ -47,6 +48,7 @@ import org.apache.spark.resource.TestResourceIDs._
 import org.apache.spark.scheduler.{SparkListener, SparkListenerExecutorMetricsUpdate, SparkListenerJobStart, SparkListenerTaskEnd, SparkListenerTaskStart}
 import org.apache.spark.shuffle.FetchFailedException
 import org.apache.spark.util.{ThreadUtils, Utils}
+import org.apache.spark.util.ArrayImplicits._
 
 class SparkContextSuite extends SparkFunSuite with LocalSparkContext with Eventually {
 
@@ -118,15 +120,15 @@ class SparkContextSuite extends SparkFunSuite with LocalSparkContext with Eventu
       val absolutePath2 = file2.getAbsolutePath
 
       try {
-        Files.write("somewords1", file1, StandardCharsets.UTF_8)
-        Files.write("somewords2", file2, StandardCharsets.UTF_8)
+        Files.asCharSink(file1, StandardCharsets.UTF_8).write("somewords1")
+        Files.asCharSink(file2, StandardCharsets.UTF_8).write("somewords2")
         val length1 = file1.length()
         val length2 = file2.length()
 
         sc = new SparkContext(new SparkConf().setAppName("test").setMaster("local"))
         sc.addFile(file1.getAbsolutePath)
         sc.addFile(relativePath)
-        sc.parallelize(Array(1), 1).map(x => {
+        sc.parallelize(Array(1).toImmutableArraySeq, 1).map(x => {
           val gotten1 = new File(SparkFiles.get(file1.getName))
           val gotten2 = new File(SparkFiles.get(file2.getName))
           if (!gotten1.exists()) {
@@ -177,10 +179,10 @@ class SparkContextSuite extends SparkFunSuite with LocalSparkContext with Eventu
         s"${jarFile.getParent}/../${jarFile.getParentFile.getName}/${jarFile.getName}#zoo"
 
       try {
-        Files.write("somewords1", file1, StandardCharsets.UTF_8)
-        Files.write("somewords22", file2, StandardCharsets.UTF_8)
-        Files.write("somewords333", file3, StandardCharsets.UTF_8)
-        Files.write("somewords4444", file4, StandardCharsets.UTF_8)
+        Files.asCharSink(file1, StandardCharsets.UTF_8).write("somewords1")
+        Files.asCharSink(file2, StandardCharsets.UTF_8).write("somewords22")
+        Files.asCharSink(file3, StandardCharsets.UTF_8).write("somewords333")
+        Files.asCharSink(file4, StandardCharsets.UTF_8).write("somewords4444")
         val length1 = file1.length()
         val length2 = file2.length()
         val length3 = file1.length()
@@ -196,7 +198,7 @@ class SparkContextSuite extends SparkFunSuite with LocalSparkContext with Eventu
         sc.addArchive(s"${zipFile.getAbsolutePath}#bar")
         sc.addArchive(relativePath2)
 
-        sc.parallelize(Array(1), 1).map { x =>
+        sc.parallelize(Array(1).toImmutableArraySeq, 1).map { x =>
           val gotten1 = new File(SparkFiles.get(jarFile.getName))
           val gotten2 = new File(SparkFiles.get(zipFile.getName))
           val gotten3 = new File(SparkFiles.get("foo"))
@@ -242,10 +244,11 @@ class SparkContextSuite extends SparkFunSuite with LocalSparkContext with Eventu
   }
 
   test("add and list jar files") {
-    val jarPath = Thread.currentThread().getContextClassLoader.getResource("TestUDTF.jar")
+    val testJar = Thread.currentThread().getContextClassLoader.getResource("TestUDTF.jar")
+    assume(testJar != null)
     try {
       sc = new SparkContext(new SparkConf().setAppName("test").setMaster("local"))
-      sc.addJar(jarPath.toString)
+      sc.addJar(testJar.toString)
       assert(sc.listJars().count(_.contains("TestUDTF.jar")) == 1)
     } finally {
       sc.stop()
@@ -276,8 +279,8 @@ class SparkContextSuite extends SparkFunSuite with LocalSparkContext with Eventu
           sc.addJar(badURL)
         }
         assert(e2.getMessage.contains(badURL))
-        assert(sc.addedFiles.isEmpty)
-        assert(sc.addedJars.isEmpty)
+        assert(sc.allAddedFiles.isEmpty)
+        assert(sc.allAddedJars.isEmpty)
       }
     } finally {
       sc.stop()
@@ -294,7 +297,7 @@ class SparkContextSuite extends SparkFunSuite with LocalSparkContext with Eventu
       try {
         sc = new SparkContext(new SparkConf().setAppName("test").setMaster("local"))
         sc.addFile(neptune.getAbsolutePath, true)
-        sc.parallelize(Array(1), 1).map(x => {
+        sc.parallelize(Array(1).toImmutableArraySeq, 1).map(x => {
           val sep = File.separator
           if (!new File(SparkFiles.get(neptune.getName + sep + alien1.getName)).exists()) {
             throw new SparkException("can't access file under root added directory")
@@ -372,8 +375,8 @@ class SparkContextSuite extends SparkFunSuite with LocalSparkContext with Eventu
       assert(subdir2.mkdir())
       val file1 = new File(subdir1, "file")
       val file2 = new File(subdir2, "file")
-      Files.write("old", file1, StandardCharsets.UTF_8)
-      Files.write("new", file2, StandardCharsets.UTF_8)
+      Files.asCharSink(file1, StandardCharsets.UTF_8).write("old")
+      Files.asCharSink(file2, StandardCharsets.UTF_8).write("new")
       sc = new SparkContext("local-cluster[1,1,1024]", "test")
       sc.addFile(file1.getAbsolutePath)
       def getAddedFileContents(): String = {
@@ -394,13 +397,15 @@ class SparkContextSuite extends SparkFunSuite with LocalSparkContext with Eventu
     schedulingMode <- Seq("local-mode", "non-local-mode");
     method <- Seq("addJar", "addFile")
   ) {
-    val jarPath = Thread.currentThread().getContextClassLoader.getResource("TestUDTF.jar").toString
     val master = schedulingMode match {
       case "local-mode" => "local"
       case "non-local-mode" => "local-cluster[1,1,1024]"
     }
     test(s"$method can be called twice with same file in $schedulingMode (SPARK-16787)") {
+      val testJar = Thread.currentThread().getContextClassLoader.getResource("TestUDTF.jar")
+      assume(testJar != null)
       sc = new SparkContext(master, "test")
+      val jarPath = testJar.toString
       method match {
         case "addJar" =>
           sc.addJar(jarPath)
@@ -502,12 +507,15 @@ class SparkContextSuite extends SparkFunSuite with LocalSparkContext with Eventu
 
         try {
           // Create 5 text files.
-          Files.write("someline1 in file1\nsomeline2 in file1\nsomeline3 in file1", file1,
-            StandardCharsets.UTF_8)
-          Files.write("someline1 in file2\nsomeline2 in file2", file2, StandardCharsets.UTF_8)
-          Files.write("someline1 in file3", file3, StandardCharsets.UTF_8)
-          Files.write("someline1 in file4\nsomeline2 in file4", file4, StandardCharsets.UTF_8)
-          Files.write("someline1 in file2\nsomeline2 in file5", file5, StandardCharsets.UTF_8)
+          Files.asCharSink(file1, StandardCharsets.UTF_8)
+            .write("someline1 in file1\nsomeline2 in file1\nsomeline3 in file1")
+          Files.asCharSink(file2, StandardCharsets.UTF_8)
+            .write("someline1 in file2\nsomeline2 in file2")
+          Files.asCharSink(file3, StandardCharsets.UTF_8).write("someline1 in file3")
+          Files.asCharSink(file4, StandardCharsets.UTF_8)
+            .write("someline1 in file4\nsomeline2 in file4")
+          Files.asCharSink(file5, StandardCharsets.UTF_8)
+            .write("someline1 in file2\nsomeline2 in file5")
 
           sc = new SparkContext(new SparkConf().setAppName("test").setMaster("local"))
 
@@ -624,6 +632,18 @@ class SparkContextSuite extends SparkFunSuite with LocalSparkContext with Eventu
       assert(LogManager.getRootLogger().getLevel === originalLevel)
       sc.stop()
     }
+  }
+
+  test("SPARK-43782: conf to override log level") {
+    sc = new SparkContext(new SparkConf().setAppName("test").setMaster("local")
+      .set(SPARK_LOG_LEVEL, "ERROR"))
+    assert(LogManager.getRootLogger().getLevel === Level.ERROR)
+    sc.stop()
+
+    sc = new SparkContext(new SparkConf().setAppName("test").setMaster("local")
+      .set(SPARK_LOG_LEVEL, "TRACE"))
+    assert(LogManager.getRootLogger().getLevel === Level.TRACE)
+    sc.stop()
   }
 
   test("register and deregister Spark listener from SparkContext") {
@@ -840,8 +860,8 @@ class SparkContextSuite extends SparkFunSuite with LocalSparkContext with Eventu
     sc.addSparkListener(listener)
     sc.range(0, 2).groupBy((x: Long) => x % 2, 2).map { case (x, _) =>
       val context = org.apache.spark.TaskContext.get()
-      if (context.stageAttemptNumber == 0) {
-        if (context.partitionId == 0) {
+      if (context.stageAttemptNumber() == 0) {
+        if (context.partitionId() == 0) {
           // Make the first task in the first stage attempt fail.
           throw new FetchFailedException(SparkEnv.get.blockManager.blockManagerId, 0, 0L, 0, 0,
             new java.io.IOException("fake"))
@@ -945,7 +965,7 @@ class SparkContextSuite extends SparkFunSuite with LocalSparkContext with Eventu
       sc = new SparkContext(conf)
     }.getMessage()
 
-    assert(error.contains("No executor resource configs were not specified for the following " +
+    assert(error.contains("No executor resource configs were specified for the following " +
       "task configs: gpu"))
   }
 
@@ -1229,7 +1249,7 @@ class SparkContextSuite extends SparkFunSuite with LocalSparkContext with Eventu
         sc.addFile(fileUrl1)
         sc.addJar(jar2.toString)
         sc.addFile(file2.toString)
-        sc.parallelize(Array(1), 1).map { x =>
+        sc.parallelize(Array(1).toImmutableArraySeq, 1).map { x =>
           val gottenJar1 = new File(SparkFiles.get(jar1.getName))
           if (!gottenJar1.exists()) {
             throw new SparkException("file doesn't exist : " + jar1)
@@ -1407,6 +1427,52 @@ class SparkContextSuite extends SparkFunSuite with LocalSparkContext with Eventu
     sc = new SparkContext(conf)
     sc.stop()
   }
+
+  test("SPARK-50247: BLOCK_MANAGER_REREGISTRATION_FAILED should be counted as network failure") {
+    // This test case follows the test structure of HEARTBEAT_FAILURE error code (SPARK-39957)
+    val conf = new SparkConf().set(TASK_MAX_FAILURES, 1)
+    val sc = new SparkContext("local-cluster[1, 1, 1024]", "test-exit-code", conf)
+    val result = sc.parallelize(1 to 10, 1).map { x =>
+      val context = org.apache.spark.TaskContext.get()
+      if (context.taskAttemptId() == 0) {
+        System.exit(ExecutorExitCode.BLOCK_MANAGER_REREGISTRATION_FAILED)
+      } else {
+        x
+      }
+    }.count()
+    assert(result == 10L)
+    sc.stop()
+  }
+
+  test("SPARK-50247: BLOCK_MANAGER_REREGISTRATION_FAILED will be counted as task failure when " +
+    "EXECUTOR_REMOVE_DELAY is disabled") {
+    // This test case follows the test structure of HEARTBEAT_FAILURE error code (SPARK-39957)
+    val conf = new SparkConf().set(TASK_MAX_FAILURES, 1).set(EXECUTOR_REMOVE_DELAY.key, "0s")
+    val sc = new SparkContext("local-cluster[1, 1, 1024]", "test-exit-code", conf)
+    eventually(timeout(30.seconds), interval(1.seconds)) {
+      val e = intercept[SparkException] {
+        sc.parallelize(1 to 10, 1).map { x =>
+          val context = org.apache.spark.TaskContext.get()
+          if (context.taskAttemptId() == 0) {
+            System.exit(ExecutorExitCode.BLOCK_MANAGER_REREGISTRATION_FAILED)
+          } else {
+            x
+          }
+        }.count()
+      }
+      assert(e.getMessage.contains("Remote RPC client disassociated"))
+    }
+    sc.stop()
+  }
+
+  test("SPARK-51095: Test caller context initialization") {
+    val conf = new SparkConf().setAppName("test").setMaster("local")
+    sc = new SparkContext(conf)
+    val hadoopCallerContext = HadoopCallerContext.getCurrent()
+    assert(hadoopCallerContext.getContext().startsWith("SPARK_DRIVER"))
+    sc.stop()
+  }
+
 }
 
 object SparkContextSuite {

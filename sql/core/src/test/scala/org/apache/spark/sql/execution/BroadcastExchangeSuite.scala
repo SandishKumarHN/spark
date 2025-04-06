@@ -22,21 +22,23 @@ import java.util.concurrent.{CountDownLatch, TimeUnit}
 import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkException, SparkFunSuite}
 import org.apache.spark.broadcast.TorrentBroadcast
 import org.apache.spark.scheduler._
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.classic.SparkSession
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.exchange.BroadcastExchangeExec
 import org.apache.spark.sql.execution.joins.HashedRelation
 import org.apache.spark.sql.functions.broadcast
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.test.SharedSparkSession
+import org.apache.spark.tags.ExtendedSQLTest
 
+@ExtendedSQLTest
 class BroadcastExchangeSuite extends SparkPlanTest
   with SharedSparkSession
   with AdaptiveSparkPlanHelper {
 
   import testImplicits._
 
-  test("BroadcastExchange should cancel the job group if timeout") {
+  test("BroadcastExchange should cancel the job tag if timeout") {
     val startLatch = new CountDownLatch(1)
     val endLatch = new CountDownLatch(1)
     var jobEvents: Seq[SparkListenerEvent] = Seq.empty[SparkListenerEvent]
@@ -80,7 +82,8 @@ class BroadcastExchangeSuite extends SparkPlanTest
       val events = jobEvents.toArray
       val hasStart = events(0).isInstanceOf[SparkListenerJobStart]
       val hasCancelled = events(1).asInstanceOf[SparkListenerJobEnd].jobResult
-        .asInstanceOf[JobFailed].exception.getMessage.contains("cancelled job group")
+        .asInstanceOf[JobFailed]
+        .exception.getMessage.contains("The corresponding broadcast query has failed.")
       events.length == 2 && hasStart && hasCancelled
     }
   }
@@ -98,6 +101,7 @@ class BroadcastExchangeSuite extends SparkPlanTest
 }
 
 // Additional tests run in 'local-cluster' mode.
+@ExtendedSQLTest
 class BroadcastExchangeExecSparkSuite
   extends SparkFunSuite with LocalSparkContext with AdaptiveSparkPlanHelper {
 

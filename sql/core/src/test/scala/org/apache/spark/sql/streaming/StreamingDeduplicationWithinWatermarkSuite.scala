@@ -21,7 +21,9 @@ import org.apache.spark.sql.{AnalysisException, Dataset, SaveMode}
 import org.apache.spark.sql.catalyst.streaming.InternalOutputModes.Append
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.functions.timestamp_seconds
+import org.apache.spark.tags.SlowSQLTest
 
+@SlowSQLTest
 class StreamingDeduplicationWithinWatermarkSuite extends StateStoreMetricsTest {
 
   import testImplicits._
@@ -196,5 +198,40 @@ class StreamingDeduplicationWithinWatermarkSuite extends StateStoreMetricsTest {
         CheckNewAnswer(("c", 9, "c"))
       )
     }
+  }
+
+  test("SPARK-46676: canonicalization of StreamingDeduplicateWithinWatermarkExec should work") {
+    withTempDir { checkpoint =>
+      val dedupeInputData = MemoryStream[(String, Int)]
+      val dedupe = dedupeInputData.toDS()
+        .withColumn("eventTime", timestamp_seconds($"_2"))
+        .withWatermark("eventTime", "10 second")
+        .dropDuplicatesWithinWatermark("_1")
+        .select($"_1", $"eventTime".cast("long").as[Long])
+
+      testStream(dedupe, Append)(
+        StartStream(checkpointLocation = checkpoint.getCanonicalPath),
+        AddData(dedupeInputData, "a" -> 1),
+        CheckNewAnswer("a" -> 1),
+        Execute { q =>
+          // This threw out error before SPARK-46676.
+          q.lastExecution.executedPlan.canonicalized
+        }
+      )
+    }
+  }
+
+  test("SPARK-50492: drop event time column after dropDuplicatesWithinWatermark") {
+    val inputData = MemoryStream[(Int, Int)]
+    val result = inputData.toDS()
+      .withColumn("first", timestamp_seconds($"_1"))
+      .withWatermark("first", "10 seconds")
+      .dropDuplicatesWithinWatermark("_2")
+      .select("_2")
+
+    testStream(result, Append)(
+      AddData(inputData, (1, 2)),
+      CheckAnswer(2)
+    )
   }
 }

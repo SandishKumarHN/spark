@@ -2,6 +2,8 @@
 --CONFIG_DIM1 spark.sql.codegen.wholeStage=true
 --CONFIG_DIM1 spark.sql.codegen.wholeStage=false,spark.sql.codegen.factoryMode=CODEGEN_ONLY
 --CONFIG_DIM1 spark.sql.codegen.wholeStage=false,spark.sql.codegen.factoryMode=NO_CODEGEN
+--CONFIG_DIM2 spark.sql.optimizer.windowGroupLimitThreshold=-1
+--CONFIG_DIM2 spark.sql.optimizer.windowGroupLimitThreshold=1000
 
 -- Test data.
 CREATE OR REPLACE TEMPORARY VIEW testData AS SELECT * FROM VALUES
@@ -325,6 +327,7 @@ SELECT
     lag(v, 1) IGNORE NULLS OVER w lag_1,
     lag(v, 2) IGNORE NULLS OVER w lag_2,
     lag(v, 3) IGNORE NULLS OVER w lag_3,
+    lag(v, +3) IGNORE NULLS OVER w lag_plus_3,
     nth_value(v, 1) IGNORE NULLS OVER w nth_value_1,
     nth_value(v, 2) IGNORE NULLS OVER w nth_value_2,
     nth_value(v, 3) IGNORE NULLS OVER w nth_value_3,
@@ -465,3 +468,18 @@ SELECT
 	SUM(salary) OVER w sum_salary
 FROM
 	basic_pays;
+
+-- Test cases for InferWindowGroupLimit
+create or replace temp view t1 (p, o) as values (1, 1), (1, 1), (1, 2), (2, 1), (2, 1), (2, 2);
+select * from (select *, dense_rank() over (partition by p order by o) as rnk from t1) where rnk = 1;
+
+SELECT * FROM (SELECT cate, val, rank() OVER(PARTITION BY cate ORDER BY val) as r FROM testData) where r = 1;
+SELECT * FROM (SELECT cate, val, rank() OVER(PARTITION BY cate ORDER BY val) as r FROM testData) where r <= 2;
+SELECT * FROM (SELECT cate, val, dense_rank() OVER(PARTITION BY cate ORDER BY val) as r FROM testData) where r = 1;
+SELECT * FROM (SELECT cate, val, dense_rank() OVER(PARTITION BY cate ORDER BY val) as r FROM testData) where r <= 2;
+SELECT * FROM (SELECT cate, val, row_number() OVER(PARTITION BY cate ORDER BY val) as r FROM testData) where r = 1;
+SELECT * FROM (SELECT cate, val, row_number() OVER(PARTITION BY cate ORDER BY val) as r FROM testData) where r <= 2;
+
+SELECT *, mean(val_double) over (partition BY val ORDER BY val_date RANGE INTERVAL '5' DAY PRECEDING) AS mean FROM testData;
+SELECT *, mean(val_double) over (partition BY val ORDER BY val_date RANGE INTERVAL '1 2:3:4.001' DAY TO SECOND PRECEDING) AS mean FROM testData;
+SELECT *, mean(val_double) over (partition BY val ORDER BY val_date RANGE DATE '2024-01-01' FOLLOWING) AS mean FROM testData;

@@ -23,6 +23,7 @@ import org.apache.parquet.io.PrimitiveColumnIO
 import org.apache.parquet.schema.Type.Repetition
 
 import org.apache.spark.sql.types.DataType
+import org.apache.spark.util.ArrayImplicits._
 
 /**
  * Rich information for a Parquet column together with its SparkSQL type.
@@ -34,7 +35,10 @@ case class ParquetColumn(
     definitionLevel: Int,
     required: Boolean,
     path: Seq[String],
-    children: Seq[ParquetColumn]) {
+    children: Seq[ParquetColumn],
+    // When `variantFileType` has value, the parquet column should produce a Spark variant type, and
+    // `variantFileType` describes the file schema of the Parquet variant column.
+    variantFileType: Option[ParquetColumn] = None) {
 
   def isPrimitive: Boolean = descriptor.nonEmpty
 }
@@ -43,12 +47,12 @@ object ParquetColumn {
   def apply(sparkType: DataType, io: PrimitiveColumnIO): ParquetColumn = {
     this(sparkType, Some(io.getColumnDescriptor), io.getRepetitionLevel,
       io.getDefinitionLevel, io.getType.isRepetition(Repetition.REQUIRED),
-      io.getFieldPath, Seq.empty)
+      io.getFieldPath.toImmutableArraySeq, Seq.empty)
   }
 
   def apply(sparkType: DataType, io: GroupColumnIO, children: Seq[ParquetColumn]): ParquetColumn = {
     this(sparkType, None, io.getRepetitionLevel,
       io.getDefinitionLevel, io.getType.isRepetition(Repetition.REQUIRED),
-      io.getFieldPath, children)
+      io.getFieldPath.toImmutableArraySeq, children)
   }
 }

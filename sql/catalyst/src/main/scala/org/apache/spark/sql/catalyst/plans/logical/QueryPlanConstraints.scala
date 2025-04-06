@@ -48,7 +48,7 @@ trait QueryPlanConstraints extends ConstraintHelper { self: LogicalPlan =>
    * canonicalized and filtered automatically to contain only those attributes that appear in the
    * [[outputSet]].
    *
-   * See [[Canonicalize]] for more details.
+   * See [[Expression#canonicalized]] for more details.
    */
   protected lazy val validConstraints: ExpressionSet = ExpressionSet()
 }
@@ -137,7 +137,7 @@ trait ConstraintHelper {
   private def scanNullIntolerantAttribute(expr: Expression): Seq[Expression] = expr match {
     case e: ExtractValue if isExtractOnly(e) => Seq(e)
     case a: Attribute => Seq(a)
-    case _: NullIntolerant => expr.children.flatMap(scanNullIntolerantAttribute)
+    case e if e.nullIntolerant => expr.children.flatMap(scanNullIntolerantAttribute)
     case _ => Seq.empty[Attribute]
   }
 }

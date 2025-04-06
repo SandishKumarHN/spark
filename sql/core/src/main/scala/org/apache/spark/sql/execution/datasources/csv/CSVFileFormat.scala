@@ -26,6 +26,7 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.csv.{CSVHeaderChecker, CSVOptions, UnivocityParser}
 import org.apache.spark.sql.catalyst.expressions.ExprUtils
 import org.apache.spark.sql.catalyst.util.CompressionCodecs
+import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
@@ -67,6 +68,14 @@ class CSVFileFormat extends TextBasedFileFormat with DataSourceRegister {
       job: Job,
       options: Map[String, String],
       dataSchema: StructType): OutputWriterFactory = {
+    // This is a defensive check to ensure the schema doesn't have variant. It shouldn't be
+    // triggered if other part of the code is correct because `supportDataType` doesn't allow
+    // variant (in case the user is not using `supportDataType/supportReadDataType` correctly).
+    dataSchema.foreach { field =>
+      if (!supportDataType(field.dataType, allowVariant = false)) {
+        throw QueryCompilationErrors.dataTypeUnsupportedByDataSourceError("CSV", field)
+      }
+    }
     val conf = job.getConfiguration
     val csvOptions = new CSVOptions(
       options,
@@ -85,7 +94,7 @@ class CSVFileFormat extends TextBasedFileFormat with DataSourceRegister {
       }
 
       override def getFileExtension(context: TaskAttemptContext): String = {
-        ".csv" + CodecStreams.getCompressionExtension(context)
+        "." + csvOptions.extension + CodecStreams.getCompressionExtension(context)
       }
     }
   }
@@ -100,15 +109,21 @@ class CSVFileFormat extends TextBasedFileFormat with DataSourceRegister {
       hadoopConf: Configuration): (PartitionedFile) => Iterator[InternalRow] = {
     val broadcastedHadoopConf =
       sparkSession.sparkContext.broadcast(new SerializableConfiguration(hadoopConf))
-    val columnPruning = sparkSession.sessionState.conf.csvColumnPruning
     val parsedOptions = new CSVOptions(
       options,
-      columnPruning,
+      sparkSession.sessionState.conf.csvColumnPruning,
       sparkSession.sessionState.conf.sessionLocalTimeZone,
       sparkSession.sessionState.conf.columnNameOfCorruptRecord)
+    val isColumnPruningEnabled = parsedOptions.isColumnPruningEnabled(requiredSchema)
 
     // Check a field requirement for corrupt records here to throw an exception in a driver side
     ExprUtils.verifyColumnNameOfCorruptRecord(dataSchema, parsedOptions.columnNameOfCorruptRecord)
+
+    if (requiredSchema.length == 1 &&
+      requiredSchema.head.name == parsedOptions.columnNameOfCorruptRecord) {
+      throw QueryCompilationErrors.queryFromRawFilesIncludeCorruptRecordColumnError()
+    }
+
     // Don't push any filter which refers to the "virtual" column which cannot present in the input.
     // Such filters will be applied later on the upper layer.
     val actualFilters =
@@ -125,7 +140,10 @@ class CSVFileFormat extends TextBasedFileFormat with DataSourceRegister {
         actualRequiredSchema,
         parsedOptions,
         actualFilters)
-      val schema = if (columnPruning) actualRequiredSchema else actualDataSchema
+      // Use column pruning when specified by Catalyst, except when one or more columns have
+      // existence default value(s), since in that case we instruct the CSV parser to disable column
+      // pruning and instead read each entire row in order to correctly assign the default value(s).
+      val schema = if (isColumnPruningEnabled) actualRequiredSchema else actualDataSchema
       val isStartOfFile = file.start == 0
       val headerChecker = new CSVHeaderChecker(
         schema, parsedOptions, source = s"CSV file: ${file.urlEncodedPath}", isStartOfFile)
@@ -144,9 +162,20 @@ class CSVFileFormat extends TextBasedFileFormat with DataSourceRegister {
 
   override def equals(other: Any): Boolean = other.isInstanceOf[CSVFileFormat]
 
-  override def supportDataType(dataType: DataType): Boolean = dataType match {
-    case _: BinaryType => false
+  /**
+   * Allow reading variant from CSV, but don't allow writing variant into CSV. This is because the
+   * written data (the string representation of variant) may not be read back as the same variant.
+   */
+  override def supportDataType(dataType: DataType): Boolean =
+    supportDataType(dataType, allowVariant = false)
 
+  override def supportReadDataType(dataType: DataType): Boolean =
+    supportDataType(dataType, allowVariant = true)
+
+  private def supportDataType(dataType: DataType, allowVariant: Boolean): Boolean = dataType match {
+    case _: VariantType => allowVariant
+
+    case _: TimeType => false
     case _: AtomicType => true
 
     case udt: UserDefinedType[_] => supportDataType(udt.sqlType)
@@ -154,4 +183,5 @@ class CSVFileFormat extends TextBasedFileFormat with DataSourceRegister {
     case _ => false
   }
 
+  override def allowDuplicatedColumnNames: Boolean = true
 }

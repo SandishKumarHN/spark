@@ -27,15 +27,18 @@ import scala.util.Random
 import org.apache.commons.io.FileUtils
 import org.scalatest.BeforeAndAfter
 
+import org.apache.spark.SparkUnsupportedOperationException
 import org.apache.spark.scheduler.ExecutorCacheTaskLocation
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.plans.physical.HashPartitioning
+import org.apache.spark.sql.execution.datasources.v2.state.StateSourceOptions
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeExec
 import org.apache.spark.sql.execution.streaming.{MemoryStream, StatefulOperatorStateInfo, StreamingSymmetricHashJoinExec, StreamingSymmetricHashJoinHelper}
 import org.apache.spark.sql.execution.streaming.state.{RocksDBStateStoreProvider, StateStore, StateStoreProviderId}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.tags.SlowSQLTest
 import org.apache.spark.util.Utils
 
 abstract class StreamingJoinSuite
@@ -54,7 +57,7 @@ abstract class StreamingJoinSuite
 
   protected def setupStream(prefix: String, multiplier: Int): (MemoryStream[Int], DataFrame) = {
     val input = MemoryStream[Int]
-    val df = input.toDF
+    val df = input.toDF()
       .select(
         $"value" as "key",
         timestamp_seconds($"value")  as s"${prefix}Time",
@@ -162,12 +165,12 @@ abstract class StreamingJoinSuite
     val leftInput = MemoryStream[(Int, Int)]
     val rightInput = MemoryStream[(Int, Int)]
 
-    val df1 = leftInput.toDF.toDF("leftKey", "time")
+    val df1 = leftInput.toDF().toDF("leftKey", "time")
       .select($"leftKey", timestamp_seconds($"time") as "leftTime",
         ($"leftKey" * 2) as "leftValue")
       .withWatermark("leftTime", watermark)
 
-    val df2 = rightInput.toDF.toDF("rightKey", "time")
+    val df2 = rightInput.toDF().toDF("rightKey", "time")
       .select($"rightKey", timestamp_seconds($"time") as "rightTime",
         ($"rightKey" * 3) as "rightValue")
       .withWatermark("rightTime", watermark)
@@ -221,8 +224,29 @@ abstract class StreamingJoinSuite
 
     (inputStream, select)
   }
+
+  protected def assertStateStoreRows(
+      opId: Long,
+      joinSide: String,
+      expectedRows: Seq[Row])(projFn: DataFrame => DataFrame): AssertOnQuery = Execute { q =>
+    val checkpointLoc = q.resolvedCheckpointRoot
+
+    // just make sure the query have no leftover data
+    q.processAllAvailable()
+
+    // By default, it reads the state store from latest committed batch.
+    val stateStoreDf = spark.read.format("statestore")
+      .option(StateSourceOptions.JOIN_SIDE, joinSide)
+      .option(StateSourceOptions.PATH, checkpointLoc)
+      .option(StateSourceOptions.OPERATOR_ID, opId)
+      .load()
+
+    val projectedDf = projFn(stateStoreDf)
+    checkAnswer(projectedDf, expectedRows)
+  }
 }
 
+@SlowSQLTest
 class StreamingInnerJoinSuite extends StreamingJoinSuite {
 
   import testImplicits._
@@ -230,8 +254,8 @@ class StreamingInnerJoinSuite extends StreamingJoinSuite {
     val input1 = MemoryStream[Int]
     val input2 = MemoryStream[Int]
 
-    val df1 = input1.toDF.select($"value" as "key", ($"value" * 2) as "leftValue")
-    val df2 = input2.toDF.select($"value" as "key", ($"value" * 3) as "rightValue")
+    val df1 = input1.toDF().select($"value" as "key", ($"value" * 2) as "leftValue")
+    val df2 = input2.toDF().select($"value" as "key", ($"value" * 3) as "rightValue")
     val joined = df1.join(df2, "key")
 
     testStream(joined)(
@@ -259,12 +283,12 @@ class StreamingInnerJoinSuite extends StreamingJoinSuite {
     val input1 = MemoryStream[Int]
     val input2 = MemoryStream[Int]
 
-    val df1 = input1.toDF
+    val df1 = input1.toDF()
       .select($"value" as "key", timestamp_seconds($"value") as "timestamp",
         ($"value" * 2) as "leftValue")
       .select($"key", window($"timestamp", "10 second"), $"leftValue")
 
-    val df2 = input2.toDF
+    val df2 = input2.toDF()
       .select($"value" as "key", timestamp_seconds($"value") as "timestamp",
         ($"value" * 3) as "rightValue")
       .select($"key", window($"timestamp", "10 second"), $"rightValue")
@@ -300,13 +324,13 @@ class StreamingInnerJoinSuite extends StreamingJoinSuite {
     val input1 = MemoryStream[Int]
     val input2 = MemoryStream[Int]
 
-    val df1 = input1.toDF
+    val df1 = input1.toDF()
       .select($"value" as "key", timestamp_seconds($"value") as "timestamp",
         ($"value" * 2) as "leftValue")
       .withWatermark("timestamp", "10 seconds")
       .select($"key", window($"timestamp", "10 second"), $"leftValue")
 
-    val df2 = input2.toDF
+    val df2 = input2.toDF()
       .select($"value" as "key", timestamp_seconds($"value") as "timestamp",
         ($"value" * 3) as "rightValue")
       .select($"key", window($"timestamp", "10 second"), $"rightValue")
@@ -351,12 +375,12 @@ class StreamingInnerJoinSuite extends StreamingJoinSuite {
     val leftInput = MemoryStream[(Int, Int)]
     val rightInput = MemoryStream[(Int, Int)]
 
-    val df1 = leftInput.toDF.toDF("leftKey", "time")
+    val df1 = leftInput.toDF().toDF("leftKey", "time")
       .select($"leftKey", timestamp_seconds($"time") as "leftTime",
         ($"leftKey" * 2) as "leftValue")
       .withWatermark("leftTime", "10 seconds")
 
-    val df2 = rightInput.toDF.toDF("rightKey", "time")
+    val df2 = rightInput.toDF().toDF("rightKey", "time")
       .select($"rightKey", timestamp_seconds($"time") as "rightTime",
         ($"rightKey" * 3) as "rightValue")
       .withWatermark("rightTime", "10 seconds")
@@ -411,12 +435,12 @@ class StreamingInnerJoinSuite extends StreamingJoinSuite {
     val leftInput = MemoryStream[(Int, Int)]
     val rightInput = MemoryStream[(Int, Int)]
 
-    val df1 = leftInput.toDF.toDF("leftKey", "time")
+    val df1 = leftInput.toDF().toDF("leftKey", "time")
       .select($"leftKey", timestamp_seconds($"time") as "leftTime",
         ($"leftKey" * 2) as "leftValue")
       .withWatermark("leftTime", "20 seconds")
 
-    val df2 = rightInput.toDF.toDF("rightKey", "time")
+    val df2 = rightInput.toDF().toDF("rightKey", "time")
       .select($"rightKey", timestamp_seconds($"time") as "rightTime",
         ($"rightKey" * 3) as "rightValue")
       .withWatermark("rightTime", "30 seconds")
@@ -495,9 +519,9 @@ class StreamingInnerJoinSuite extends StreamingJoinSuite {
     val input1 = MemoryStream[Int]
     val input2 = MemoryStream[Int]
 
-    val df1 = input1.toDF
+    val df1 = input1.toDF()
       .select($"value" as "leftKey", ($"value" * 2) as "leftValue")
-    val df2 = input2.toDF
+    val df2 = input2.toDF()
       .select($"value" as "rightKey", ($"value" * 3) as "rightValue")
     val joined = df1.join(df2, expr("leftKey < rightKey"))
     val e = intercept[Exception] {
@@ -510,7 +534,7 @@ class StreamingInnerJoinSuite extends StreamingJoinSuite {
 
   test("stream stream self join") {
     val input = MemoryStream[Int]
-    val df = input.toDF
+    val df = input.toDF()
     val join =
       df.select($"value" % 5 as "key", $"value").join(
         df.select($"value" % 5 as "key", $"value"), "key")
@@ -535,11 +559,12 @@ class StreamingInnerJoinSuite extends StreamingJoinSuite {
     withTempDir { tempDir =>
       val queryId = UUID.randomUUID
       val opId = 0
-      val path = Utils.createDirectory(tempDir.getAbsolutePath, Random.nextFloat.toString).toString
-      val stateInfo = StatefulOperatorStateInfo(path, queryId, opId, 0L, 5)
+      val path =
+        Utils.createDirectory(tempDir.getAbsolutePath, Random.nextFloat().toString).toString
+      val stateInfo = StatefulOperatorStateInfo(path, queryId, opId, 0L, 5, None)
 
       implicit val sqlContext = spark.sqlContext
-      val coordinatorRef = sqlContext.streams.stateStoreCoordinator
+      val coordinatorRef = spark.streams.stateStoreCoordinator
       val numPartitions = 5
       val storeNames = Seq("name1", "name2")
 
@@ -577,10 +602,10 @@ class StreamingInnerJoinSuite extends StreamingJoinSuite {
     val input2 = MemoryStream[Int]
     val input3 = MemoryStream[Int]
 
-    val df1 = input1.toDF.select($"value" as "leftKey", ($"value" * 2) as "leftValue")
-    val df2 = input2.toDF
+    val df1 = input1.toDF().select($"value" as "leftKey", ($"value" * 2) as "leftValue")
+    val df2 = input2.toDF()
       .select($"value" as "middleKey", ($"value" * 3) as "middleValue")
-    val df3 = input3.toDF
+    val df3 = input3.toDF()
       .select($"value" as "rightKey", ($"value" * 5) as "rightValue")
 
     val joined = df1.join(df2, expr("leftKey = middleKey")).join(df3, expr("rightKey = middleKey"))
@@ -596,9 +621,9 @@ class StreamingInnerJoinSuite extends StreamingJoinSuite {
     val input1 = MemoryStream[Int]
     val input2 = MemoryStream[Int]
 
-    val df1 = input1.toDF
+    val df1 = input1.toDF()
       .select($"value" as Symbol("a"), $"value" * 2 as Symbol("b"))
-    val df2 = input2.toDF
+    val df2 = input2.toDF()
       .select($"value" as Symbol("a"), $"value" * 2 as Symbol("b"))
       .repartition($"b")
     val joined = df1.join(df2, Seq("a", "b")).select($"a")
@@ -615,7 +640,7 @@ class StreamingInnerJoinSuite extends StreamingJoinSuite {
           }
         }
 
-        val numPartitions = spark.sqlContext.conf.getConf(SQLConf.SHUFFLE_PARTITIONS)
+        val numPartitions = spark.sessionState.conf.getConf(SQLConf.SHUFFLE_PARTITIONS)
 
         assert(query.lastExecution.executedPlan.collect {
           case j @ StreamingSymmetricHashJoinExec(_, _, _, _, _, _, _, _, _,
@@ -685,17 +710,157 @@ class StreamingInnerJoinSuite extends StreamingJoinSuite {
     )
   }
 
+  test("SPARK-48687 - restore the stream-stream inner join query from Spark 3.5 and " +
+   "changing the join condition (key schema) should fail the query") {
+    // NOTE: We are also changing the schema of input compared to the checkpoint.
+    // In the checkpoint we define the input schema as (Int, Long), which does not have name
+    // in both left and right.
+    val inputStream = MemoryStream[(Int, Long, String)]
+    val df = inputStream.toDS()
+      .select(col("_1").as("value"), timestamp_seconds($"_2").as("timestamp"),
+        col("_3").as("name"))
+
+    val leftStream = df.select(col("value").as("leftId"),
+      col("timestamp").as("leftTime"), col("name").as("leftName"))
+
+    val rightStream = df
+      // Introduce misses for ease of debugging
+      .where(col("value") % 2 === 0)
+      .select(col("value").as("rightId"),
+        col("timestamp").as("rightTime"), col("name").as("rightName"))
+
+    val query = leftStream
+      .withWatermark("leftTime", "5 seconds")
+      .join(
+        rightStream.withWatermark("rightTime", "5 seconds"),
+        expr("rightId = leftId AND leftName = rightName AND rightTime >= leftTime AND " +
+          "rightTime <= leftTime + interval 5 seconds"),
+        joinType = "inner")
+      .select(col("leftId"), col("leftTime").cast("int"),
+        col("leftName"),
+        col("rightId"), col("rightTime").cast("int"),
+        col("rightName"))
+
+    val resourceUri = this.getClass.getResource(
+      "/structured-streaming/checkpoint-version-3.5.1-streaming-join/").toURI
+    val checkpointDir = Utils.createTempDir().getCanonicalFile
+    // Copy the checkpoint to a temp dir to prevent changes to the original.
+    // Not doing this will lead to the test passing on the first run, but fail subsequent runs.
+    FileUtils.copyDirectory(new File(resourceUri), checkpointDir)
+    inputStream.addData((1, 1L, "a"), (2, 2L, "b"), (3, 3L, "c"), (4, 4L, "d"), (5, 5L, "e"))
+
+    val ex = intercept[StreamingQueryException] {
+      testStream(query)(
+        StartStream(checkpointLocation = checkpointDir.getAbsolutePath),
+        /*
+        Note: The checkpoint was generated using the following input in Spark version 3.5.1
+        The base query is different because it does not use the leftName/rightName columns
+        as part of the join keys/condition that is used as part of the key schema.
+
+        AddData(inputStream, (1, 1L), (2, 2L), (3, 3L), (4, 4L), (5, 5L)),
+        // batch 1 - global watermark = 0
+        // states
+        // left: (1, 1L), (2, 2L), (3, 3L), (4, 4L), (5, 5L)
+        // right: (2, 2L), (4, 4L)
+        CheckNewAnswer((2, 2L, 2, 2L), (4, 4L, 4, 4L)),
+        */
+        AddData(inputStream, (6, 6L, "a"), (7, 7L, "a"), (8, 8L, "a"), (9, 9L, "a"),
+          (10, 10L, "a")),
+        CheckNewAnswer((6, 6L, "a", 6, 6L, "a"), (8, 8L, "a", 8, 8L, "a"),
+          (10, 10L, "a", 10, 10L, "a"))
+      )
+    }
+
+    checkError(
+      ex.getCause.asInstanceOf[SparkUnsupportedOperationException],
+      condition = "STATE_STORE_KEY_SCHEMA_NOT_COMPATIBLE",
+      parameters = Map("storedKeySchema" -> ".*",
+        "newKeySchema" -> ".*"),
+      matchPVals = true
+    )
+  }
+
+  test("SPARK-48687 - restore the stream-stream inner join query from Spark 3.5 and " +
+   "changing the value schema should fail the query") {
+    // NOTE: We are also changing the schema of input compared to the checkpoint.
+    // In the checkpoint we define the input schema as (Int, Long), which does not have name
+    // in both left and right.
+    val inputStream = MemoryStream[(Int, Long, String)]
+    val df = inputStream.toDS()
+      .select(col("_1").as("value"), timestamp_seconds($"_2").as("timestamp"),
+        col("_3").as("name"))
+
+    val leftStream = df.select(col("value").as("leftId"),
+      col("timestamp").as("leftTime"), col("name").as("leftName"))
+
+    val rightStream = df
+      // Introduce misses for ease of debugging
+      .where(col("value") % 2 === 0)
+      .select(col("value").as("rightId"),
+        col("timestamp").as("rightTime"), col("name").as("rightName"))
+
+    val query = leftStream
+      .withWatermark("leftTime", "5 seconds")
+      .join(
+        rightStream.withWatermark("rightTime", "5 seconds"),
+        expr("rightId = leftId AND rightTime >= leftTime AND " +
+          "rightTime <= leftTime + interval 5 seconds"),
+        joinType = "inner")
+      .select(col("leftId"), col("leftTime").cast("int"),
+        col("leftName"),
+        col("rightId"), col("rightTime").cast("int"),
+        col("rightName"))
+
+    val resourceUri = this.getClass.getResource(
+      "/structured-streaming/checkpoint-version-3.5.1-streaming-join/").toURI
+    val checkpointDir = Utils.createTempDir().getCanonicalFile
+    // Copy the checkpoint to a temp dir to prevent changes to the original.
+    // Not doing this will lead to the test passing on the first run, but fail subsequent runs.
+    FileUtils.copyDirectory(new File(resourceUri), checkpointDir)
+    inputStream.addData((1, 1L, "a"), (2, 2L, "b"), (3, 3L, "c"), (4, 4L, "d"), (5, 5L, "e"))
+
+    val ex = intercept[StreamingQueryException] {
+      testStream(query)(
+        StartStream(checkpointLocation = checkpointDir.getAbsolutePath),
+        /*
+        Note: The checkpoint was generated using the following input in Spark version 3.5.1
+        The base query is different because it does not use the leftName/rightName columns
+        as part of the generated output that is used as part of the value schema.
+
+        AddData(inputStream, (1, 1L), (2, 2L), (3, 3L), (4, 4L), (5, 5L)),
+        // batch 1 - global watermark = 0
+        // states
+        // left: (1, 1L), (2, 2L), (3, 3L), (4, 4L), (5, 5L)
+        // right: (2, 2L), (4, 4L)
+        CheckNewAnswer((2, 2L, 2, 2L), (4, 4L, 4, 4L)),
+        */
+        AddData(inputStream, (6, 6L, "a"), (7, 7L, "a"), (8, 8L, "a"), (9, 9L, "a"),
+          (10, 10L, "a")),
+        CheckNewAnswer((6, 6L, "a", 6, 6L, "a"), (8, 8L, "a", 8, 8L, "a"),
+          (10, 10L, "a", 10, 10L, "a"))
+      )
+    }
+
+    checkError(
+      ex.getCause.asInstanceOf[SparkUnsupportedOperationException],
+      condition = "STATE_STORE_VALUE_SCHEMA_NOT_COMPATIBLE",
+      parameters = Map("storedValueSchema" -> ".*",
+        "newValueSchema" -> ".*"),
+      matchPVals = true
+    )
+  }
+
   test("SPARK-35896: metrics in StateOperatorProgress are output correctly") {
     val input1 = MemoryStream[Int]
     val input2 = MemoryStream[Int]
 
-    val df1 = input1.toDF
+    val df1 = input1.toDF()
       .select($"value" as "key", timestamp_seconds($"value") as "timestamp",
         ($"value" * 2) as "leftValue")
       .withWatermark("timestamp", "10 seconds")
       .select($"key", window($"timestamp", "10 second"), $"leftValue")
 
-    val df2 = input2.toDF
+    val df2 = input2.toDF()
       .select($"value" as "key", timestamp_seconds($"value") as "timestamp",
         ($"value" * 3) as "rightValue")
       .select($"key", window($"timestamp", "10 second"), $"rightValue")
@@ -776,6 +941,7 @@ class StreamingInnerJoinSuite extends StreamingJoinSuite {
 }
 
 
+@SlowSQLTest
 class StreamingOuterJoinSuite extends StreamingJoinSuite {
 
   import testImplicits._
@@ -889,7 +1055,7 @@ class StreamingOuterJoinSuite extends StreamingJoinSuite {
     ("left_outer", Row(3, null, 5, null)),
     ("right_outer", Row(null, 2, null, 5))
   ).foreach { case (joinType: String, outerResult) =>
-    test(s"${joinType.replaceAllLiterally("_", " ")} with watermark range condition") {
+    test(s"${joinType.replace("_", " ")} with watermark range condition") {
       val (leftInput, rightInput, joined) = setupJoinWithRangeCondition(joinType)
 
       testStream(joined)(
@@ -1148,7 +1314,7 @@ class StreamingOuterJoinSuite extends StreamingJoinSuite {
     def constructUnionDf(desiredPartitionsForInput1: Int)
         : (MemoryStream[Int], MemoryStream[Int], MemoryStream[Int], DataFrame) = {
       val input1 = MemoryStream[Int](desiredPartitionsForInput1)
-      val df1 = input1.toDF
+      val df1 = input1.toDF()
         .select(
           $"value" as "key",
           $"value" as "leftValue",
@@ -1203,12 +1369,12 @@ class StreamingOuterJoinSuite extends StreamingJoinSuite {
 
   test("SPARK-32148 stream-stream join regression on Spark 3.0.0") {
     val input1 = MemoryStream[(Timestamp, String, String)]
-    val df1 = input1.toDF
+    val df1 = input1.toDF()
       .selectExpr("_1 as eventTime", "_2 as id", "_3 as comment")
       .withWatermark(s"eventTime", "2 minutes")
 
     val input2 = MemoryStream[(Timestamp, String, String)]
-    val df2 = input2.toDF
+    val df2 = input2.toDF()
       .selectExpr("_1 as eventTime", "_2 as id", "_3 as name")
       .withWatermark(s"eventTime", "4 minutes")
 
@@ -1363,12 +1529,12 @@ class StreamingOuterJoinSuite extends StreamingJoinSuite {
       SQLConf.STATE_STORE_PROVIDER_CLASS.key -> classOf[RocksDBStateStoreProvider].getName) {
 
       val input1 = MemoryStream[(Timestamp, String, String)]
-      val df1 = input1.toDF
+      val df1 = input1.toDF()
         .selectExpr("_1 as eventTime", "_2 as id", "_3 as comment")
         .withWatermark("eventTime", "0 second")
 
       val input2 = MemoryStream[(Timestamp, String, String)]
-      val df2 = input2.toDF
+      val df2 = input2.toDF()
         .selectExpr("_1 as eventTime", "_2 as id", "_3 as comment")
         .withWatermark("eventTime", "0 second")
 
@@ -1414,8 +1580,69 @@ class StreamingOuterJoinSuite extends StreamingJoinSuite {
       )
     }
   }
+
+  test("SPARK-49829 left-outer join, input being unmatched is between WM for late event and " +
+    "WM for eviction") {
+
+    withTempDir { checkpoint =>
+      // This config needs to be set, otherwise no-data batch will be triggered and after
+      // no-data batch, WM for late event and WM for eviction would be same.
+      withSQLConf(SQLConf.STREAMING_NO_DATA_MICRO_BATCHES_ENABLED.key -> "false") {
+        val memoryStream1 = MemoryStream[(String, Int)]
+        val memoryStream2 = MemoryStream[(String, Int)]
+
+        val data1 = memoryStream1.toDF()
+          .selectExpr("_1 AS key", "timestamp_seconds(_2) AS eventTime")
+          .withWatermark("eventTime", "0 seconds")
+        val data2 = memoryStream2.toDF()
+          .selectExpr("_1 AS key", "timestamp_seconds(_2) AS eventTime")
+          .withWatermark("eventTime", "0 seconds")
+
+        val joinedDf = data1.join(data2, Seq("key", "eventTime"), "leftOuter")
+          .selectExpr("key", "CAST(eventTime AS long) AS eventTime")
+
+        def assertLeftRows(expected: Seq[Row]): AssertOnQuery = {
+          assertStateStoreRows(0L, "left", expected) { df =>
+            df.selectExpr("value.key", "CAST(value.eventTime AS long)")
+          }
+        }
+
+        def assertRightRows(expected: Seq[Row]): AssertOnQuery = {
+          assertStateStoreRows(0L, "right", expected) { df =>
+            df.selectExpr("value.key", "CAST(value.eventTime AS long)")
+          }
+        }
+
+        testStream(joinedDf)(
+          StartStream(checkpointLocation = checkpoint.getCanonicalPath),
+          // batch 0
+          // WM: late record = 0, eviction = 0
+          MultiAddData(
+            (memoryStream1, Seq(("a", 1), ("b", 2))),
+            (memoryStream2, Seq(("b", 2), ("c", 1)))
+          ),
+          CheckNewAnswer(("b", 2)),
+          assertLeftRows(Seq(Row("a", 1), Row("b", 2))),
+          assertRightRows(Seq(Row("b", 2), Row("c", 1))),
+          // batch 1
+          // WM: late record = 0, eviction = 2
+          // Before Spark introduces multiple stateful operator, WM for late record was same as
+          // WM for eviction, hence ("d", 1) was treated as late record.
+          // With the multiple state operator, ("d", 1) is added in batch 1 but also evicted in
+          // batch 1. Note that the eviction is happening with state watermark: for this join,
+          // state watermark = state eviction under join condition. Before SPARK-49829, this
+          // wasn't producing unmatched row, and it is fixed.
+          AddData(memoryStream1, ("d", 1)),
+          CheckNewAnswer(("a", 1), ("d", 1)),
+          assertLeftRows(Seq()),
+          assertRightRows(Seq())
+        )
+      }
+    }
+  }
 }
 
+@SlowSQLTest
 class StreamingFullOuterJoinSuite extends StreamingJoinSuite {
 
   test("windowed full outer join") {
@@ -1619,6 +1846,7 @@ class StreamingFullOuterJoinSuite extends StreamingJoinSuite {
   }
 }
 
+@SlowSQLTest
 class StreamingLeftSemiJoinSuite extends StreamingJoinSuite {
 
   import testImplicits._
@@ -1818,5 +2046,129 @@ class StreamingLeftSemiJoinSuite extends StreamingJoinSuite {
       // right: (6, 6L), (8, 8L)
       assertNumStateRows(total = 9, updated = 4)
     )
+  }
+
+  test("SPARK-49829 two chained stream-stream left outer joins among three input streams") {
+    withSQLConf(SQLConf.STREAMING_NO_DATA_MICRO_BATCHES_ENABLED.key -> "false") {
+      val memoryStream1 = MemoryStream[(Long, Int)]
+      val memoryStream2 = MemoryStream[(Long, Int)]
+      val memoryStream3 = MemoryStream[(Long, Int)]
+
+      val data1 = memoryStream1.toDF()
+        .selectExpr("timestamp_seconds(_1) AS eventTime", "_2 AS v1")
+        .withWatermark("eventTime", "0 seconds")
+      val data2 = memoryStream2.toDF()
+        .selectExpr("timestamp_seconds(_1) AS eventTime", "_2 AS v2")
+        .withWatermark("eventTime", "0 seconds")
+      val data3 = memoryStream3.toDF()
+        .selectExpr("timestamp_seconds(_1) AS eventTime", "_2 AS v3")
+        .withWatermark("eventTime", "0 seconds")
+
+      val join = data1
+        .join(data2, Seq("eventTime"), "leftOuter")
+        .join(data3, Seq("eventTime"), "leftOuter")
+        .selectExpr("CAST(eventTime AS long) AS eventTime", "v1", "v2", "v3")
+
+      def assertLeftRowsFor1stJoin(expected: Seq[Row]): AssertOnQuery = {
+        assertStateStoreRows(1L, "left", expected) { df =>
+          df.selectExpr("CAST(value.eventTime AS long)", "value.v1")
+        }
+      }
+
+      def assertRightRowsFor1stJoin(expected: Seq[Row]): AssertOnQuery = {
+        assertStateStoreRows(1L, "right", expected) { df =>
+          df.selectExpr("CAST(value.eventTime AS long)", "value.v2")
+        }
+      }
+
+      def assertLeftRowsFor2ndJoin(expected: Seq[Row]): AssertOnQuery = {
+        assertStateStoreRows(0L, "left", expected) { df =>
+          df.selectExpr("CAST(value.eventTime AS long)", "value.v1", "value.v2")
+        }
+      }
+
+      def assertRightRowsFor2ndJoin(expected: Seq[Row]): AssertOnQuery = {
+        assertStateStoreRows(0L, "right", expected) { df =>
+          df.selectExpr("CAST(value.eventTime AS long)", "value.v3")
+        }
+      }
+
+      testStream(join)(
+        // batch 0
+        // WM: late event = 0, eviction = 0
+        MultiAddData(
+          (memoryStream1, Seq((20L, 1))),
+          (memoryStream2, Seq((20L, 1))),
+          (memoryStream3, Seq((20L, 1)))
+        ),
+        CheckNewAnswer((20, 1, 1, 1)),
+        assertLeftRowsFor1stJoin(Seq(Row(20, 1))),
+        assertRightRowsFor1stJoin(Seq(Row(20, 1))),
+        assertLeftRowsFor2ndJoin(Seq(Row(20, 1, 1))),
+        assertRightRowsFor2ndJoin(Seq(Row(20, 1))),
+        // batch 1
+        // WM: late event = 0, eviction = 20
+        MultiAddData(
+          (memoryStream1, Seq((21L, 2))),
+          (memoryStream2, Seq((21L, 2)))
+        ),
+        CheckNewAnswer(),
+        assertLeftRowsFor1stJoin(Seq(Row(21, 2))),
+        assertRightRowsFor1stJoin(Seq(Row(21, 2))),
+        assertLeftRowsFor2ndJoin(Seq(Row(21, 2, 2))),
+        assertRightRowsFor2ndJoin(Seq()),
+        // batch 2
+        // WM: late event = 20, eviction = 20 (slowest: inputStream3)
+        MultiAddData(
+          (memoryStream1, Seq((22L, 3))),
+          (memoryStream3, Seq((22L, 3)))
+        ),
+        CheckNewAnswer(),
+        assertLeftRowsFor1stJoin(Seq(Row(21, 2), Row(22, 3))),
+        assertRightRowsFor1stJoin(Seq(Row(21, 2))),
+        assertLeftRowsFor2ndJoin(Seq(Row(21, 2, 2))),
+        assertRightRowsFor2ndJoin(Seq(Row(22, 3))),
+        // batch 3
+        // WM: late event = 20, eviction = 21 (slowest: inputStream2)
+        AddData(memoryStream1, (23L, 4)),
+        CheckNewAnswer(Row(21, 2, 2, null)),
+        assertLeftRowsFor1stJoin(Seq(Row(22, 3), Row(23, 4))),
+        assertRightRowsFor1stJoin(Seq()),
+        assertLeftRowsFor2ndJoin(Seq()),
+        assertRightRowsFor2ndJoin(Seq(Row(22, 3))),
+        // batch 4
+        // WM: late event = 21, eviction = 21 (slowest: inputStream2)
+        MultiAddData(
+          (memoryStream1, Seq((24L, 5))),
+          (memoryStream2, Seq((24L, 5))),
+          (memoryStream3, Seq((24L, 5)))
+        ),
+        CheckNewAnswer(Row(24, 5, 5, 5)),
+        assertLeftRowsFor1stJoin(Seq(Row(22, 3), Row(23, 4), Row(24, 5))),
+        assertRightRowsFor1stJoin(Seq(Row(24, 5))),
+        assertLeftRowsFor2ndJoin(Seq(Row(24, 5, 5))),
+        assertRightRowsFor2ndJoin(Seq(Row(22, 3), Row(24, 5))),
+        // batch 5
+        // WM: late event = 21, eviction = 24
+        // just trigger a new batch with arbitrary data as the original test relies on no-data
+        // batch, and we need to check with remaining unmatched outputs
+        AddData(memoryStream1, (100L, 6)),
+        // Before SPARK-49829, the test fails because (23, 4, null, null) wasn't produced.
+        // (The assertion of state for left inputs & right inputs weren't included on the test
+        // before SPARK-49829.)
+        CheckNewAnswer(Row(22, 3, null, 3), Row(23, 4, null, null))
+      )
+
+      /*
+      // The collection of the above new answers is the same with below in original test:
+      val expected = Array(
+        Row(Timestamp.valueOf("2024-02-10 10:20:00"), 1, 1, 1),
+        Row(Timestamp.valueOf("2024-02-10 10:21:00"), 2, 2, null),
+        Row(Timestamp.valueOf("2024-02-10 10:22:00"), 3, null, 3),
+        Row(Timestamp.valueOf("2024-02-10 10:23:00"), 4, null, null),
+        Row(Timestamp.valueOf("2024-02-10 10:24:00"), 5, 5, 5),
+      )
+       */
+    }
   }
 }

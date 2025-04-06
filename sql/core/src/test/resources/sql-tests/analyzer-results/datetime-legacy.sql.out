@@ -2,7 +2,7 @@
 -- !query
 create temporary view date_view as select '2011-11-11' date_str, '1' int_str
 -- !query analysis
-CreateViewCommand `date_view`, select '2011-11-11' date_str, '1' int_str, false, false, LocalTempView, true
+CreateViewCommand `date_view`, select '2011-11-11' date_str, '1' int_str, false, false, LocalTempView, UNSUPPORTED, true
    +- Project [2011-11-11 AS date_str#x, 1 AS int_str#x]
       +- OneRowRelation
 
@@ -37,21 +37,21 @@ org.apache.spark.sql.catalyst.parser.ParseException
 -- !query
 select make_date(2019, 1, 1), make_date(12, 12, 12)
 -- !query analysis
-Project [make_date(2019, 1, 1, false) AS make_date(2019, 1, 1)#x, make_date(12, 12, 12, false) AS make_date(12, 12, 12)#x]
+Project [make_date(2019, 1, 1, true) AS make_date(2019, 1, 1)#x, make_date(12, 12, 12, true) AS make_date(12, 12, 12)#x]
 +- OneRowRelation
 
 
 -- !query
 select make_date(2000, 13, 1)
 -- !query analysis
-Project [make_date(2000, 13, 1, false) AS make_date(2000, 13, 1)#x]
+Project [make_date(2000, 13, 1, true) AS make_date(2000, 13, 1)#x]
 +- OneRowRelation
 
 
 -- !query
 select make_date(2000, 1, 33)
 -- !query analysis
-Project [make_date(2000, 1, 33, false) AS make_date(2000, 1, 33)#x]
+Project [make_date(2000, 1, 33, true) AS make_date(2000, 1, 33)#x]
 +- OneRowRelation
 
 
@@ -148,21 +148,21 @@ select UNIX_DATE(DATE('1970-01-01')), UNIX_DATE(DATE('2020-12-04')), UNIX_DATE(n
 -- !query
 select to_date(null), to_date('2016-12-31'), to_date('2016-12-31', 'yyyy-MM-dd')
 -- !query analysis
-Project [to_date(cast(null as string), None, Some(America/Los_Angeles)) AS to_date(NULL)#x, to_date(2016-12-31, None, Some(America/Los_Angeles)) AS to_date(2016-12-31)#x, to_date(2016-12-31, Some(yyyy-MM-dd), Some(America/Los_Angeles)) AS to_date(2016-12-31, yyyy-MM-dd)#x]
+Project [to_date(cast(null as string), None, Some(America/Los_Angeles), true) AS to_date(NULL)#x, to_date(2016-12-31, None, Some(America/Los_Angeles), true) AS to_date(2016-12-31)#x, to_date(2016-12-31, Some(yyyy-MM-dd), Some(America/Los_Angeles), true) AS to_date(2016-12-31, yyyy-MM-dd)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_date("16", "dd")
 -- !query analysis
-Project [to_date(16, Some(dd), Some(America/Los_Angeles)) AS to_date(16, dd)#x]
+Project [to_date(16, Some(dd), Some(America/Los_Angeles), true) AS to_date(16, dd)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_date("02-29", "MM-dd")
 -- !query analysis
-Project [to_date(02-29, Some(MM-dd), Some(America/Los_Angeles)) AS to_date(02-29, MM-dd)#x]
+Project [to_date(02-29, Some(MM-dd), Some(America/Los_Angeles), true) AS to_date(02-29, MM-dd)#x]
 +- OneRowRelation
 
 
@@ -201,21 +201,21 @@ select dayOfYear('1500-01-01'), dayOfYear('1582-10-15 13:10:15'), dayOfYear(time
 -- !query
 select next_day("2015-07-23", "Mon")
 -- !query analysis
-Project [next_day(cast(2015-07-23 as date), Mon, false) AS next_day(2015-07-23, Mon)#x]
+Project [next_day(cast(2015-07-23 as date), Mon, true) AS next_day(2015-07-23, Mon)#x]
 +- OneRowRelation
 
 
 -- !query
 select next_day("2015-07-23", "xx")
 -- !query analysis
-Project [next_day(cast(2015-07-23 as date), xx, false) AS next_day(2015-07-23, xx)#x]
+Project [next_day(cast(2015-07-23 as date), xx, true) AS next_day(2015-07-23, xx)#x]
 +- OneRowRelation
 
 
 -- !query
 select next_day("2015-07-23 12:12:12", "Mon")
 -- !query analysis
-Project [next_day(cast(2015-07-23 12:12:12 as date), Mon, false) AS next_day(2015-07-23 12:12:12, Mon)#x]
+Project [next_day(cast(2015-07-23 12:12:12 as date), Mon, true) AS next_day(2015-07-23 12:12:12, Mon)#x]
 +- OneRowRelation
 
 
@@ -228,28 +228,28 @@ select next_day(timestamp_ltz"2015-07-23 12:12:12", "Mon")
 -- !query
 select next_day(timestamp_ntz"2015-07-23 12:12:12", "Mon")
 -- !query analysis
-Project [next_day(cast(2015-07-23 12:12:12 as date), Mon, false) AS next_day(TIMESTAMP_NTZ '2015-07-23 12:12:12', Mon)#x]
+Project [next_day(cast(2015-07-23 12:12:12 as date), Mon, true) AS next_day(TIMESTAMP_NTZ '2015-07-23 12:12:12', Mon)#x]
 +- OneRowRelation
 
 
 -- !query
 select next_day("xx", "Mon")
 -- !query analysis
-Project [next_day(cast(xx as date), Mon, false) AS next_day(xx, Mon)#x]
+Project [next_day(cast(xx as date), Mon, true) AS next_day(xx, Mon)#x]
 +- OneRowRelation
 
 
 -- !query
 select next_day(null, "Mon")
 -- !query analysis
-Project [next_day(cast(null as date), Mon, false) AS next_day(NULL, Mon)#x]
+Project [next_day(cast(null as date), Mon, true) AS next_day(NULL, Mon)#x]
 +- OneRowRelation
 
 
 -- !query
 select next_day(null, "xx")
 -- !query analysis
-Project [next_day(cast(null as date), xx, false) AS next_day(NULL, xx)#x]
+Project [next_day(cast(null as date), xx, true) AS next_day(NULL, xx)#x]
 +- OneRowRelation
 
 
@@ -283,14 +283,14 @@ Project [date_add(cast(2011-11-11 as date), 1) AS date_add(2011-11-11, 1)#x]
 -- !query
 select date_add('2011-11-11', 1L)
 -- !query analysis
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
     "inputSql" : "\"1\"",
     "inputType" : "\"BIGINT\"",
-    "paramIndex" : "2",
+    "paramIndex" : "second",
     "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
     "sqlExpr" : "\"date_add(2011-11-11, 1)\""
   },
@@ -307,14 +307,14 @@ org.apache.spark.sql.AnalysisException
 -- !query
 select date_add('2011-11-11', 1.0)
 -- !query analysis
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
     "inputSql" : "\"1.0\"",
     "inputType" : "\"DECIMAL(2,1)\"",
-    "paramIndex" : "2",
+    "paramIndex" : "second",
     "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
     "sqlExpr" : "\"date_add(2011-11-11, 1.0)\""
   },
@@ -331,14 +331,14 @@ org.apache.spark.sql.AnalysisException
 -- !query
 select date_add('2011-11-11', 1E1)
 -- !query analysis
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
     "inputSql" : "\"10.0\"",
     "inputType" : "\"DOUBLE\"",
-    "paramIndex" : "2",
+    "paramIndex" : "second",
     "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
     "sqlExpr" : "\"date_add(2011-11-11, 10.0)\""
   },
@@ -355,21 +355,15 @@ org.apache.spark.sql.AnalysisException
 -- !query
 select date_add('2011-11-11', '1')
 -- !query analysis
-Project [date_add(cast(2011-11-11 as date), 1) AS date_add(2011-11-11, 1)#x]
+Project [date_add(cast(2011-11-11 as date), cast(1 as int)) AS date_add(2011-11-11, 1)#x]
 +- OneRowRelation
 
 
 -- !query
 select date_add('2011-11-11', '1.2')
 -- !query analysis
-org.apache.spark.sql.AnalysisException
-{
-  "errorClass" : "SECOND_FUNCTION_ARGUMENT_NOT_INTEGER",
-  "sqlState" : "22023",
-  "messageParameters" : {
-    "functionName" : "date_add"
-  }
-}
+Project [date_add(cast(2011-11-11 as date), cast(1.2 as int)) AS date_add(2011-11-11, 1.2)#x]
++- OneRowRelation
 
 
 -- !query
@@ -427,14 +421,14 @@ Project [date_sub(cast(2011-11-11 as date), 1) AS date_sub(2011-11-11, 1)#x]
 -- !query
 select date_sub('2011-11-11', 1L)
 -- !query analysis
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
     "inputSql" : "\"1\"",
     "inputType" : "\"BIGINT\"",
-    "paramIndex" : "2",
+    "paramIndex" : "second",
     "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
     "sqlExpr" : "\"date_sub(2011-11-11, 1)\""
   },
@@ -451,14 +445,14 @@ org.apache.spark.sql.AnalysisException
 -- !query
 select date_sub('2011-11-11', 1.0)
 -- !query analysis
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
     "inputSql" : "\"1.0\"",
     "inputType" : "\"DECIMAL(2,1)\"",
-    "paramIndex" : "2",
+    "paramIndex" : "second",
     "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
     "sqlExpr" : "\"date_sub(2011-11-11, 1.0)\""
   },
@@ -475,14 +469,14 @@ org.apache.spark.sql.AnalysisException
 -- !query
 select date_sub('2011-11-11', 1E1)
 -- !query analysis
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
     "inputSql" : "\"10.0\"",
     "inputType" : "\"DOUBLE\"",
-    "paramIndex" : "2",
+    "paramIndex" : "second",
     "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
     "sqlExpr" : "\"date_sub(2011-11-11, 10.0)\""
   },
@@ -505,14 +499,7 @@ select date_sub(date'2011-11-11', '1')
 -- !query
 select date_sub(date'2011-11-11', '1.2')
 -- !query analysis
-org.apache.spark.sql.AnalysisException
-{
-  "errorClass" : "SECOND_FUNCTION_ARGUMENT_NOT_INTEGER",
-  "sqlState" : "22023",
-  "messageParameters" : {
-    "functionName" : "date_sub"
-  }
-}
+[Analyzer test output redacted due to nondeterminism]
 
 
 -- !query
@@ -543,49 +530,23 @@ Project [date_sub(cast(2011-11-11 12:12:12 as date), 1) AS date_sub(TIMESTAMP_NT
 -- !query
 select date_add('2011-11-11', int_str) from date_view
 -- !query analysis
-org.apache.spark.sql.AnalysisException
-{
-  "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
-  "sqlState" : "42K09",
-  "messageParameters" : {
-    "inputSql" : "\"int_str\"",
-    "inputType" : "\"STRING\"",
-    "paramIndex" : "2",
-    "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
-    "sqlExpr" : "\"date_add(2011-11-11, int_str)\""
-  },
-  "queryContext" : [ {
-    "objectType" : "",
-    "objectName" : "",
-    "startIndex" : 8,
-    "stopIndex" : 38,
-    "fragment" : "date_add('2011-11-11', int_str)"
-  } ]
-}
+Project [date_add(cast(2011-11-11 as date), cast(int_str#x as int)) AS date_add(2011-11-11, int_str)#x]
++- SubqueryAlias date_view
+   +- View (`date_view`, [date_str#x, int_str#x])
+      +- Project [cast(date_str#x as string) AS date_str#x, cast(int_str#x as string) AS int_str#x]
+         +- Project [2011-11-11 AS date_str#x, 1 AS int_str#x]
+            +- OneRowRelation
 
 
 -- !query
 select date_sub('2011-11-11', int_str) from date_view
 -- !query analysis
-org.apache.spark.sql.AnalysisException
-{
-  "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
-  "sqlState" : "42K09",
-  "messageParameters" : {
-    "inputSql" : "\"int_str\"",
-    "inputType" : "\"STRING\"",
-    "paramIndex" : "2",
-    "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
-    "sqlExpr" : "\"date_sub(2011-11-11, int_str)\""
-  },
-  "queryContext" : [ {
-    "objectType" : "",
-    "objectName" : "",
-    "startIndex" : 8,
-    "stopIndex" : 38,
-    "fragment" : "date_sub('2011-11-11', int_str)"
-  } ]
-}
+Project [date_sub(cast(2011-11-11 as date), cast(int_str#x as int)) AS date_sub(2011-11-11, int_str)#x]
++- SubqueryAlias date_view
+   +- View (`date_view`, [date_str#x, int_str#x])
+      +- Project [cast(date_str#x as string) AS date_str#x, cast(int_str#x as string) AS int_str#x]
+         +- Project [2011-11-11 AS date_str#x, 1 AS int_str#x]
+            +- OneRowRelation
 
 
 -- !query
@@ -593,7 +554,7 @@ select date_add(date_str, 1) from date_view
 -- !query analysis
 Project [date_add(cast(date_str#x as date), 1) AS date_add(date_str, 1)#x]
 +- SubqueryAlias date_view
-   +- View (`date_view`, [date_str#x,int_str#x])
+   +- View (`date_view`, [date_str#x, int_str#x])
       +- Project [cast(date_str#x as string) AS date_str#x, cast(int_str#x as string) AS int_str#x]
          +- Project [2011-11-11 AS date_str#x, 1 AS int_str#x]
             +- OneRowRelation
@@ -604,7 +565,7 @@ select date_sub(date_str, 1) from date_view
 -- !query analysis
 Project [date_sub(cast(date_str#x as date), 1) AS date_sub(date_str, 1)#x]
 +- SubqueryAlias date_view
-   +- View (`date_view`, [date_str#x,int_str#x])
+   +- View (`date_view`, [date_str#x, int_str#x])
       +- Project [cast(date_str#x as string) AS date_str#x, cast(int_str#x as string) AS int_str#x]
          +- Project [2011-11-11 AS date_str#x, 1 AS int_str#x]
             +- OneRowRelation
@@ -613,14 +574,14 @@ Project [date_sub(cast(date_str#x as date), 1) AS date_sub(date_str, 1)#x]
 -- !query
 select date '2011-11-11' + 1E1
 -- !query analysis
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
     "inputSql" : "\"10.0\"",
     "inputType" : "\"DOUBLE\"",
-    "paramIndex" : "2",
+    "paramIndex" : "second",
     "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
     "sqlExpr" : "\"date_add(DATE '2011-11-11', 10.0)\""
   },
@@ -661,25 +622,7 @@ select date '2001-10-01' - date '2001-09-28'
 -- !query
 select date '2001-10-01' - '2001-09-28'
 -- !query analysis
-org.apache.spark.sql.AnalysisException
-{
-  "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
-  "sqlState" : "42K09",
-  "messageParameters" : {
-    "inputSql" : "\"2001-09-28\"",
-    "inputType" : "\"DOUBLE\"",
-    "paramIndex" : "2",
-    "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
-    "sqlExpr" : "\"date_sub(DATE '2001-10-01', 2001-09-28)\""
-  },
-  "queryContext" : [ {
-    "objectType" : "",
-    "objectName" : "",
-    "startIndex" : 8,
-    "stopIndex" : 39,
-    "fragment" : "date '2001-10-01' - '2001-09-28'"
-  } ]
-}
+[Analyzer test output redacted due to nondeterminism]
 
 
 -- !query
@@ -709,38 +652,20 @@ select date_str - date '2001-09-28' from date_view
 -- !query
 select date '2001-09-28' - date_str from date_view
 -- !query analysis
-org.apache.spark.sql.AnalysisException
-{
-  "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
-  "sqlState" : "42K09",
-  "messageParameters" : {
-    "inputSql" : "\"date_str\"",
-    "inputType" : "\"DOUBLE\"",
-    "paramIndex" : "2",
-    "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
-    "sqlExpr" : "\"date_sub(DATE '2001-09-28', date_str)\""
-  },
-  "queryContext" : [ {
-    "objectType" : "",
-    "objectName" : "",
-    "startIndex" : 8,
-    "stopIndex" : 35,
-    "fragment" : "date '2001-09-28' - date_str"
-  } ]
-}
+[Analyzer test output redacted due to nondeterminism]
 
 
 -- !query
 select date'2011-11-11' + '1'
 -- !query analysis
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
     "inputSql" : "\"1\"",
-    "inputType" : "\"DOUBLE\"",
-    "paramIndex" : "2",
+    "inputType" : "\"DATE\"",
+    "paramIndex" : "second",
     "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
     "sqlExpr" : "\"date_add(DATE '2011-11-11', 1)\""
   },
@@ -757,16 +682,16 @@ org.apache.spark.sql.AnalysisException
 -- !query
 select '1' + date'2011-11-11'
 -- !query analysis
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "inputSql" : "\"1\"",
-    "inputType" : "\"DOUBLE\"",
-    "paramIndex" : "2",
+    "inputSql" : "\"DATE '2011-11-11'\"",
+    "inputType" : "\"DATE\"",
+    "paramIndex" : "second",
     "requiredType" : "(\"INT\" or \"SMALLINT\" or \"TINYINT\")",
-    "sqlExpr" : "\"date_add(DATE '2011-11-11', 1)\""
+    "sqlExpr" : "\"date_add(1, DATE '2011-11-11')\""
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -804,14 +729,14 @@ select date '2012-01-01' - interval '2-2' year to month,
 -- !query
 select to_date('26/October/2015', 'dd/MMMMM/yyyy')
 -- !query analysis
-Project [to_date(26/October/2015, Some(dd/MMMMM/yyyy), Some(America/Los_Angeles)) AS to_date(26/October/2015, dd/MMMMM/yyyy)#x]
+Project [to_date(26/October/2015, Some(dd/MMMMM/yyyy), Some(America/Los_Angeles), true) AS to_date(26/October/2015, dd/MMMMM/yyyy)#x]
 +- OneRowRelation
 
 
 -- !query
 select from_json('{"d":"26/October/2015"}', 'd Date', map('dateFormat', 'dd/MMMMM/yyyy'))
 -- !query analysis
-Project [from_json(StructField(d,DateType,true), (dateFormat,dd/MMMMM/yyyy), {"d":"26/October/2015"}, Some(America/Los_Angeles)) AS from_json({"d":"26/October/2015"})#x]
+Project [from_json(StructField(d,DateType,true), (dateFormat,dd/MMMMM/yyyy), {"d":"26/October/2015"}, Some(America/Los_Angeles), false) AS from_json({"d":"26/October/2015"})#x]
 +- OneRowRelation
 
 
@@ -829,7 +754,7 @@ select dateadd(MICROSECOND, 1001, timestamp'2022-02-25 01:02:03.123')
 
 
 -- !query
-select dateadd(MILLISECOND, -1, timestamp'2022-02-25 01:02:03.456')
+select date_add(MILLISECOND, -1, timestamp'2022-02-25 01:02:03.456')
 -- !query analysis
 [Analyzer test output redacted due to nondeterminism]
 
@@ -841,7 +766,7 @@ select dateadd(SECOND, 58, timestamp'2022-02-25 01:02:03')
 
 
 -- !query
-select dateadd(MINUTE, -100, date'2022-02-25')
+select date_add(MINUTE, -100, date'2022-02-25')
 -- !query analysis
 [Analyzer test output redacted due to nondeterminism]
 
@@ -853,7 +778,7 @@ select dateadd(HOUR, -1, timestamp'2022-02-25 01:02:03')
 
 
 -- !query
-select dateadd(DAY, 367, date'2022-02-25')
+select date_add(DAY, 367, date'2022-02-25')
 -- !query analysis
 [Analyzer test output redacted due to nondeterminism]
 
@@ -865,7 +790,7 @@ select dateadd(WEEK, -4, timestamp'2022-02-25 01:02:03')
 
 
 -- !query
-select dateadd(MONTH, -1, timestamp'2022-02-25 01:02:03')
+select date_add(MONTH, -1, timestamp'2022-02-25 01:02:03')
 -- !query analysis
 [Analyzer test output redacted due to nondeterminism]
 
@@ -877,9 +802,53 @@ select dateadd(QUARTER, 5, date'2022-02-25')
 
 
 -- !query
-select dateadd(YEAR, 1, date'2022-02-25')
+select date_add(YEAR, 1, date'2022-02-25')
 -- !query analysis
 [Analyzer test output redacted due to nondeterminism]
+
+
+-- !query
+select dateadd('MICROSECOND', 1001, timestamp'2022-02-25 01:02:03.123')
+-- !query analysis
+org.apache.spark.sql.catalyst.parser.ParseException
+{
+  "errorClass" : "INVALID_PARAMETER_VALUE.DATETIME_UNIT",
+  "sqlState" : "22023",
+  "messageParameters" : {
+    "functionName" : "`dateadd`",
+    "invalidValue" : "'MICROSECOND'",
+    "parameter" : "`unit`"
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 71,
+    "fragment" : "dateadd('MICROSECOND', 1001, timestamp'2022-02-25 01:02:03.123')"
+  } ]
+}
+
+
+-- !query
+select date_add('QUARTER', 5, date'2022-02-25')
+-- !query analysis
+org.apache.spark.sql.catalyst.parser.ParseException
+{
+  "errorClass" : "INVALID_PARAMETER_VALUE.DATETIME_UNIT",
+  "sqlState" : "22023",
+  "messageParameters" : {
+    "functionName" : "`date_add`",
+    "invalidValue" : "'QUARTER'",
+    "parameter" : "`unit`"
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 47,
+    "fragment" : "date_add('QUARTER', 5, date'2022-02-25')"
+  } ]
+}
 
 
 -- !query
@@ -889,7 +858,7 @@ select datediff(MICROSECOND, timestamp'2022-02-25 01:02:03.123', timestamp'2022-
 
 
 -- !query
-select datediff(MILLISECOND, timestamp'2022-02-25 01:02:03.456', timestamp'2022-02-25 01:02:03.455')
+select date_diff(MILLISECOND, timestamp'2022-02-25 01:02:03.456', timestamp'2022-02-25 01:02:03.455')
 -- !query analysis
 [Analyzer test output redacted due to nondeterminism]
 
@@ -901,7 +870,7 @@ select datediff(SECOND, timestamp'2022-02-25 01:02:03', timestamp'2022-02-25 01:
 
 
 -- !query
-select datediff(MINUTE, date'2022-02-25', timestamp'2022-02-24 22:20:00')
+select date_diff(MINUTE, date'2022-02-25', timestamp'2022-02-24 22:20:00')
 -- !query analysis
 [Analyzer test output redacted due to nondeterminism]
 
@@ -913,7 +882,7 @@ select datediff(HOUR, timestamp'2022-02-25 01:02:03', timestamp'2022-02-25 00:02
 
 
 -- !query
-select datediff(DAY, date'2022-02-25', timestamp'2023-02-27 00:00:00')
+select date_diff(DAY, date'2022-02-25', timestamp'2023-02-27 00:00:00')
 -- !query analysis
 [Analyzer test output redacted due to nondeterminism]
 
@@ -925,7 +894,7 @@ select datediff(WEEK, timestamp'2022-02-25 01:02:03', timestamp'2022-01-28 01:02
 
 
 -- !query
-select datediff(MONTH, timestamp'2022-02-25 01:02:03', timestamp'2022-01-25 01:02:03')
+select date_diff(MONTH, timestamp'2022-02-25 01:02:03', timestamp'2022-01-25 01:02:03')
 -- !query analysis
 [Analyzer test output redacted due to nondeterminism]
 
@@ -937,9 +906,53 @@ select datediff(QUARTER, date'2022-02-25', date'2023-05-25')
 
 
 -- !query
-select datediff(YEAR, date'2022-02-25', date'2023-02-25')
+select date_diff(YEAR, date'2022-02-25', date'2023-02-25')
 -- !query analysis
 [Analyzer test output redacted due to nondeterminism]
+
+
+-- !query
+select date_diff('MILLISECOND', timestamp'2022-02-25 01:02:03.456', timestamp'2022-02-25 01:02:03.455')
+-- !query analysis
+org.apache.spark.sql.catalyst.parser.ParseException
+{
+  "errorClass" : "INVALID_PARAMETER_VALUE.DATETIME_UNIT",
+  "sqlState" : "22023",
+  "messageParameters" : {
+    "functionName" : "`date_diff`",
+    "invalidValue" : "'MILLISECOND'",
+    "parameter" : "`unit`"
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 103,
+    "fragment" : "date_diff('MILLISECOND', timestamp'2022-02-25 01:02:03.456', timestamp'2022-02-25 01:02:03.455')"
+  } ]
+}
+
+
+-- !query
+select datediff('YEAR', date'2022-02-25', date'2023-02-25')
+-- !query analysis
+org.apache.spark.sql.catalyst.parser.ParseException
+{
+  "errorClass" : "INVALID_PARAMETER_VALUE.DATETIME_UNIT",
+  "sqlState" : "22023",
+  "messageParameters" : {
+    "functionName" : "`datediff`",
+    "invalidValue" : "'YEAR'",
+    "parameter" : "`unit`"
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 59,
+    "fragment" : "datediff('YEAR', date'2022-02-25', date'2023-02-25')"
+  } ]
+}
 
 
 -- !query
@@ -1033,70 +1046,70 @@ Project [(localtimestamp(Some(America/Los_Angeles)) = localtimestamp(Some(Americ
 -- !query
 SELECT make_timestamp(2021, 07, 11, 6, 30, 45.678)
 -- !query analysis
-Project [make_timestamp(2021, 7, 11, 6, 30, cast(45.678 as decimal(16,6)), None, Some(America/Los_Angeles), false, TimestampType) AS make_timestamp(2021, 7, 11, 6, 30, 45.678)#x]
+Project [make_timestamp(2021, 7, 11, 6, 30, cast(45.678 as decimal(16,6)), None, Some(America/Los_Angeles), true, TimestampType) AS make_timestamp(2021, 7, 11, 6, 30, 45.678)#x]
 +- OneRowRelation
 
 
 -- !query
 SELECT make_timestamp(2021, 07, 11, 6, 30, 45.678, 'CET')
 -- !query analysis
-Project [make_timestamp(2021, 7, 11, 6, 30, cast(45.678 as decimal(16,6)), Some(CET), Some(America/Los_Angeles), false, TimestampType) AS make_timestamp(2021, 7, 11, 6, 30, 45.678, CET)#x]
+Project [make_timestamp(2021, 7, 11, 6, 30, cast(45.678 as decimal(16,6)), Some(CET), Some(America/Los_Angeles), true, TimestampType) AS make_timestamp(2021, 7, 11, 6, 30, 45.678, CET)#x]
 +- OneRowRelation
 
 
 -- !query
 SELECT make_timestamp(2021, 07, 11, 6, 30, 60.007)
 -- !query analysis
-Project [make_timestamp(2021, 7, 11, 6, 30, cast(60.007 as decimal(16,6)), None, Some(America/Los_Angeles), false, TimestampType) AS make_timestamp(2021, 7, 11, 6, 30, 60.007)#x]
+Project [make_timestamp(2021, 7, 11, 6, 30, cast(60.007 as decimal(16,6)), None, Some(America/Los_Angeles), true, TimestampType) AS make_timestamp(2021, 7, 11, 6, 30, 60.007)#x]
 +- OneRowRelation
 
 
 -- !query
 SELECT make_timestamp(1, 1, 1, 1, 1, 1)
 -- !query analysis
-Project [make_timestamp(1, 1, 1, 1, 1, cast(1 as decimal(16,6)), None, Some(America/Los_Angeles), false, TimestampType) AS make_timestamp(1, 1, 1, 1, 1, 1)#x]
+Project [make_timestamp(1, 1, 1, 1, 1, cast(1 as decimal(16,6)), None, Some(America/Los_Angeles), true, TimestampType) AS make_timestamp(1, 1, 1, 1, 1, 1)#x]
 +- OneRowRelation
 
 
 -- !query
 SELECT make_timestamp(1, 1, 1, 1, 1, 60)
 -- !query analysis
-Project [make_timestamp(1, 1, 1, 1, 1, cast(60 as decimal(16,6)), None, Some(America/Los_Angeles), false, TimestampType) AS make_timestamp(1, 1, 1, 1, 1, 60)#x]
+Project [make_timestamp(1, 1, 1, 1, 1, cast(60 as decimal(16,6)), None, Some(America/Los_Angeles), true, TimestampType) AS make_timestamp(1, 1, 1, 1, 1, 60)#x]
 +- OneRowRelation
 
 
 -- !query
 SELECT make_timestamp(1, 1, 1, 1, 1, 61)
 -- !query analysis
-Project [make_timestamp(1, 1, 1, 1, 1, cast(61 as decimal(16,6)), None, Some(America/Los_Angeles), false, TimestampType) AS make_timestamp(1, 1, 1, 1, 1, 61)#x]
+Project [make_timestamp(1, 1, 1, 1, 1, cast(61 as decimal(16,6)), None, Some(America/Los_Angeles), true, TimestampType) AS make_timestamp(1, 1, 1, 1, 1, 61)#x]
 +- OneRowRelation
 
 
 -- !query
 SELECT make_timestamp(1, 1, 1, 1, 1, null)
 -- !query analysis
-Project [make_timestamp(1, 1, 1, 1, 1, cast(null as decimal(16,6)), None, Some(America/Los_Angeles), false, TimestampType) AS make_timestamp(1, 1, 1, 1, 1, NULL)#x]
+Project [make_timestamp(1, 1, 1, 1, 1, cast(null as decimal(16,6)), None, Some(America/Los_Angeles), true, TimestampType) AS make_timestamp(1, 1, 1, 1, 1, NULL)#x]
 +- OneRowRelation
 
 
 -- !query
 SELECT make_timestamp(1, 1, 1, 1, 1, 59.999999)
 -- !query analysis
-Project [make_timestamp(1, 1, 1, 1, 1, cast(59.999999 as decimal(16,6)), None, Some(America/Los_Angeles), false, TimestampType) AS make_timestamp(1, 1, 1, 1, 1, 59.999999)#x]
+Project [make_timestamp(1, 1, 1, 1, 1, cast(59.999999 as decimal(16,6)), None, Some(America/Los_Angeles), true, TimestampType) AS make_timestamp(1, 1, 1, 1, 1, 59.999999)#x]
 +- OneRowRelation
 
 
 -- !query
 SELECT make_timestamp(1, 1, 1, 1, 1, 99.999999)
 -- !query analysis
-Project [make_timestamp(1, 1, 1, 1, 1, cast(99.999999 as decimal(16,6)), None, Some(America/Los_Angeles), false, TimestampType) AS make_timestamp(1, 1, 1, 1, 1, 99.999999)#x]
+Project [make_timestamp(1, 1, 1, 1, 1, cast(99.999999 as decimal(16,6)), None, Some(America/Los_Angeles), true, TimestampType) AS make_timestamp(1, 1, 1, 1, 1, 99.999999)#x]
 +- OneRowRelation
 
 
 -- !query
 SELECT make_timestamp(1, 1, 1, 1, 1, 999.999999)
 -- !query analysis
-Project [make_timestamp(1, 1, 1, 1, 1, cast(999.999999 as decimal(16,6)), None, Some(America/Los_Angeles), false, TimestampType) AS make_timestamp(1, 1, 1, 1, 1, 999.999999)#x]
+Project [make_timestamp(1, 1, 1, 1, 1, cast(999.999999 as decimal(16,6)), None, Some(America/Los_Angeles), true, TimestampType) AS make_timestamp(1, 1, 1, 1, 1, 999.999999)#x]
 +- OneRowRelation
 
 
@@ -1179,7 +1192,7 @@ create temporary view ttf1 as select * from values
 CreateViewCommand `ttf1`, select * from values
   (1, 2),
   (2, 3)
-  as ttf1(`current_date`, `current_timestamp`), false, false, LocalTempView, true
+  as ttf1(`current_date`, `current_timestamp`), false, false, LocalTempView, UNSUPPORTED, true
    +- Project [current_date#x, current_timestamp#x]
       +- SubqueryAlias ttf1
          +- LocalRelation [current_date#x, current_timestamp#x]
@@ -1190,7 +1203,7 @@ select typeof(current_date), typeof(current_timestamp) from ttf1
 -- !query analysis
 Project [typeof(current_date#x) AS typeof(current_date)#x, typeof(current_timestamp#x) AS typeof(current_timestamp)#x]
 +- SubqueryAlias ttf1
-   +- View (`ttf1`, [current_date#x,current_timestamp#x])
+   +- View (`ttf1`, [current_date#x, current_timestamp#x])
       +- Project [cast(current_date#x as int) AS current_date#x, cast(current_timestamp#x as int) AS current_timestamp#x]
          +- Project [current_date#x, current_timestamp#x]
             +- SubqueryAlias ttf1
@@ -1206,7 +1219,7 @@ create temporary view ttf2 as select * from values
 CreateViewCommand `ttf2`, select * from values
   (1, 2),
   (2, 3)
-  as ttf2(a, b), false, false, LocalTempView, true
+  as ttf2(a, b), false, false, LocalTempView, UNSUPPORTED, true
    +- Project [a#x, b#x]
       +- SubqueryAlias ttf2
          +- LocalRelation [a#x, b#x]
@@ -1245,231 +1258,231 @@ select UNIX_MICROS(timestamp'2020-12-01 14:30:08Z'), UNIX_MICROS(timestamp'2020-
 -- !query
 select to_timestamp(null), to_timestamp('2016-12-31 00:12:00'), to_timestamp('2016-12-31', 'yyyy-MM-dd')
 -- !query analysis
-Project [to_timestamp(cast(null as string), None, TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(NULL)#x, to_timestamp(2016-12-31 00:12:00, None, TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2016-12-31 00:12:00)#x, to_timestamp(2016-12-31, Some(yyyy-MM-dd), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2016-12-31, yyyy-MM-dd)#x]
+Project [to_timestamp(cast(null as string), None, TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(NULL)#x, to_timestamp(2016-12-31 00:12:00, None, TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2016-12-31 00:12:00)#x, to_timestamp(2016-12-31, Some(yyyy-MM-dd), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2016-12-31, yyyy-MM-dd)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp(1)
 -- !query analysis
-Project [to_timestamp(1, None, TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(1)#x]
+Project [to_timestamp(1, None, TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(1)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('2019-10-06 10:11:12.', 'yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]')
 -- !query analysis
-Project [to_timestamp(2019-10-06 10:11:12., Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06 10:11:12., yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
+Project [to_timestamp(2019-10-06 10:11:12., Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06 10:11:12., yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('2019-10-06 10:11:12.0', 'yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]')
 -- !query analysis
-Project [to_timestamp(2019-10-06 10:11:12.0, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06 10:11:12.0, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
+Project [to_timestamp(2019-10-06 10:11:12.0, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06 10:11:12.0, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('2019-10-06 10:11:12.1', 'yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]')
 -- !query analysis
-Project [to_timestamp(2019-10-06 10:11:12.1, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06 10:11:12.1, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
+Project [to_timestamp(2019-10-06 10:11:12.1, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06 10:11:12.1, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('2019-10-06 10:11:12.12', 'yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]')
 -- !query analysis
-Project [to_timestamp(2019-10-06 10:11:12.12, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06 10:11:12.12, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
+Project [to_timestamp(2019-10-06 10:11:12.12, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06 10:11:12.12, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('2019-10-06 10:11:12.123UTC', 'yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]')
 -- !query analysis
-Project [to_timestamp(2019-10-06 10:11:12.123UTC, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06 10:11:12.123UTC, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
+Project [to_timestamp(2019-10-06 10:11:12.123UTC, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06 10:11:12.123UTC, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('2019-10-06 10:11:12.1234', 'yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]')
 -- !query analysis
-Project [to_timestamp(2019-10-06 10:11:12.1234, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06 10:11:12.1234, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
+Project [to_timestamp(2019-10-06 10:11:12.1234, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06 10:11:12.1234, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('2019-10-06 10:11:12.12345CST', 'yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]')
 -- !query analysis
-Project [to_timestamp(2019-10-06 10:11:12.12345CST, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06 10:11:12.12345CST, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
+Project [to_timestamp(2019-10-06 10:11:12.12345CST, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06 10:11:12.12345CST, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('2019-10-06 10:11:12.123456PST', 'yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]')
 -- !query analysis
-Project [to_timestamp(2019-10-06 10:11:12.123456PST, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06 10:11:12.123456PST, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
+Project [to_timestamp(2019-10-06 10:11:12.123456PST, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06 10:11:12.123456PST, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('2019-10-06 10:11:12.1234567PST', 'yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]')
 -- !query analysis
-Project [to_timestamp(2019-10-06 10:11:12.1234567PST, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06 10:11:12.1234567PST, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
+Project [to_timestamp(2019-10-06 10:11:12.1234567PST, Some(yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06 10:11:12.1234567PST, yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('123456 2019-10-06 10:11:12.123456PST', 'SSSSSS yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]')
 -- !query analysis
-Project [to_timestamp(123456 2019-10-06 10:11:12.123456PST, Some(SSSSSS yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(123456 2019-10-06 10:11:12.123456PST, SSSSSS yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
+Project [to_timestamp(123456 2019-10-06 10:11:12.123456PST, Some(SSSSSS yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(123456 2019-10-06 10:11:12.123456PST, SSSSSS yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('223456 2019-10-06 10:11:12.123456PST', 'SSSSSS yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]')
 -- !query analysis
-Project [to_timestamp(223456 2019-10-06 10:11:12.123456PST, Some(SSSSSS yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(223456 2019-10-06 10:11:12.123456PST, SSSSSS yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
+Project [to_timestamp(223456 2019-10-06 10:11:12.123456PST, Some(SSSSSS yyyy-MM-dd HH:mm:ss.SSSSSS[zzz]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(223456 2019-10-06 10:11:12.123456PST, SSSSSS yyyy-MM-dd HH:mm:ss.SSSSSS[zzz])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('2019-10-06 10:11:12.1234', 'yyyy-MM-dd HH:mm:ss.[SSSSSS]')
 -- !query analysis
-Project [to_timestamp(2019-10-06 10:11:12.1234, Some(yyyy-MM-dd HH:mm:ss.[SSSSSS]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06 10:11:12.1234, yyyy-MM-dd HH:mm:ss.[SSSSSS])#x]
+Project [to_timestamp(2019-10-06 10:11:12.1234, Some(yyyy-MM-dd HH:mm:ss.[SSSSSS]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06 10:11:12.1234, yyyy-MM-dd HH:mm:ss.[SSSSSS])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('2019-10-06 10:11:12.123', 'yyyy-MM-dd HH:mm:ss[.SSSSSS]')
 -- !query analysis
-Project [to_timestamp(2019-10-06 10:11:12.123, Some(yyyy-MM-dd HH:mm:ss[.SSSSSS]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06 10:11:12.123, yyyy-MM-dd HH:mm:ss[.SSSSSS])#x]
+Project [to_timestamp(2019-10-06 10:11:12.123, Some(yyyy-MM-dd HH:mm:ss[.SSSSSS]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06 10:11:12.123, yyyy-MM-dd HH:mm:ss[.SSSSSS])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('2019-10-06 10:11:12', 'yyyy-MM-dd HH:mm:ss[.SSSSSS]')
 -- !query analysis
-Project [to_timestamp(2019-10-06 10:11:12, Some(yyyy-MM-dd HH:mm:ss[.SSSSSS]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06 10:11:12, yyyy-MM-dd HH:mm:ss[.SSSSSS])#x]
+Project [to_timestamp(2019-10-06 10:11:12, Some(yyyy-MM-dd HH:mm:ss[.SSSSSS]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06 10:11:12, yyyy-MM-dd HH:mm:ss[.SSSSSS])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('2019-10-06 10:11:12.12', 'yyyy-MM-dd HH:mm[:ss.SSSSSS]')
 -- !query analysis
-Project [to_timestamp(2019-10-06 10:11:12.12, Some(yyyy-MM-dd HH:mm[:ss.SSSSSS]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06 10:11:12.12, yyyy-MM-dd HH:mm[:ss.SSSSSS])#x]
+Project [to_timestamp(2019-10-06 10:11:12.12, Some(yyyy-MM-dd HH:mm[:ss.SSSSSS]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06 10:11:12.12, yyyy-MM-dd HH:mm[:ss.SSSSSS])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('2019-10-06 10:11', 'yyyy-MM-dd HH:mm[:ss.SSSSSS]')
 -- !query analysis
-Project [to_timestamp(2019-10-06 10:11, Some(yyyy-MM-dd HH:mm[:ss.SSSSSS]), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06 10:11, yyyy-MM-dd HH:mm[:ss.SSSSSS])#x]
+Project [to_timestamp(2019-10-06 10:11, Some(yyyy-MM-dd HH:mm[:ss.SSSSSS]), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06 10:11, yyyy-MM-dd HH:mm[:ss.SSSSSS])#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp("2019-10-06S10:11:12.12345", "yyyy-MM-dd'S'HH:mm:ss.SSSSSS")
 -- !query analysis
-Project [to_timestamp(2019-10-06S10:11:12.12345, Some(yyyy-MM-dd'S'HH:mm:ss.SSSSSS), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06S10:11:12.12345, yyyy-MM-dd'S'HH:mm:ss.SSSSSS)#x]
+Project [to_timestamp(2019-10-06S10:11:12.12345, Some(yyyy-MM-dd'S'HH:mm:ss.SSSSSS), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06S10:11:12.12345, yyyy-MM-dd'S'HH:mm:ss.SSSSSS)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp("12.12342019-10-06S10:11", "ss.SSSSyyyy-MM-dd'S'HH:mm")
 -- !query analysis
-Project [to_timestamp(12.12342019-10-06S10:11, Some(ss.SSSSyyyy-MM-dd'S'HH:mm), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(12.12342019-10-06S10:11, ss.SSSSyyyy-MM-dd'S'HH:mm)#x]
+Project [to_timestamp(12.12342019-10-06S10:11, Some(ss.SSSSyyyy-MM-dd'S'HH:mm), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(12.12342019-10-06S10:11, ss.SSSSyyyy-MM-dd'S'HH:mm)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp("12.1232019-10-06S10:11", "ss.SSSSyyyy-MM-dd'S'HH:mm")
 -- !query analysis
-Project [to_timestamp(12.1232019-10-06S10:11, Some(ss.SSSSyyyy-MM-dd'S'HH:mm), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(12.1232019-10-06S10:11, ss.SSSSyyyy-MM-dd'S'HH:mm)#x]
+Project [to_timestamp(12.1232019-10-06S10:11, Some(ss.SSSSyyyy-MM-dd'S'HH:mm), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(12.1232019-10-06S10:11, ss.SSSSyyyy-MM-dd'S'HH:mm)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp("12.1232019-10-06S10:11", "ss.SSSSyy-MM-dd'S'HH:mm")
 -- !query analysis
-Project [to_timestamp(12.1232019-10-06S10:11, Some(ss.SSSSyy-MM-dd'S'HH:mm), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(12.1232019-10-06S10:11, ss.SSSSyy-MM-dd'S'HH:mm)#x]
+Project [to_timestamp(12.1232019-10-06S10:11, Some(ss.SSSSyy-MM-dd'S'HH:mm), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(12.1232019-10-06S10:11, ss.SSSSyy-MM-dd'S'HH:mm)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp("12.1234019-10-06S10:11", "ss.SSSSy-MM-dd'S'HH:mm")
 -- !query analysis
-Project [to_timestamp(12.1234019-10-06S10:11, Some(ss.SSSSy-MM-dd'S'HH:mm), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(12.1234019-10-06S10:11, ss.SSSSy-MM-dd'S'HH:mm)#x]
+Project [to_timestamp(12.1234019-10-06S10:11, Some(ss.SSSSy-MM-dd'S'HH:mm), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(12.1234019-10-06S10:11, ss.SSSSy-MM-dd'S'HH:mm)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp("2019-10-06S", "yyyy-MM-dd'S'")
 -- !query analysis
-Project [to_timestamp(2019-10-06S, Some(yyyy-MM-dd'S'), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06S, yyyy-MM-dd'S')#x]
+Project [to_timestamp(2019-10-06S, Some(yyyy-MM-dd'S'), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06S, yyyy-MM-dd'S')#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp("S2019-10-06", "'S'yyyy-MM-dd")
 -- !query analysis
-Project [to_timestamp(S2019-10-06, Some('S'yyyy-MM-dd), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(S2019-10-06, 'S'yyyy-MM-dd)#x]
+Project [to_timestamp(S2019-10-06, Some('S'yyyy-MM-dd), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(S2019-10-06, 'S'yyyy-MM-dd)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp("2019-10-06T10:11:12'12", "yyyy-MM-dd'T'HH:mm:ss''SSSS")
 -- !query analysis
-Project [to_timestamp(2019-10-06T10:11:12'12, Some(yyyy-MM-dd'T'HH:mm:ss''SSSS), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06T10:11:12'12, yyyy-MM-dd'T'HH:mm:ss''SSSS)#x]
+Project [to_timestamp(2019-10-06T10:11:12'12, Some(yyyy-MM-dd'T'HH:mm:ss''SSSS), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06T10:11:12'12, yyyy-MM-dd'T'HH:mm:ss''SSSS)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp("2019-10-06T10:11:12'", "yyyy-MM-dd'T'HH:mm:ss''")
 -- !query analysis
-Project [to_timestamp(2019-10-06T10:11:12', Some(yyyy-MM-dd'T'HH:mm:ss''), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06T10:11:12', yyyy-MM-dd'T'HH:mm:ss'')#x]
+Project [to_timestamp(2019-10-06T10:11:12', Some(yyyy-MM-dd'T'HH:mm:ss''), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06T10:11:12', yyyy-MM-dd'T'HH:mm:ss'')#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp("'2019-10-06T10:11:12", "''yyyy-MM-dd'T'HH:mm:ss")
 -- !query analysis
-Project [to_timestamp('2019-10-06T10:11:12, Some(''yyyy-MM-dd'T'HH:mm:ss), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp('2019-10-06T10:11:12, ''yyyy-MM-dd'T'HH:mm:ss)#x]
+Project [to_timestamp('2019-10-06T10:11:12, Some(''yyyy-MM-dd'T'HH:mm:ss), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp('2019-10-06T10:11:12, ''yyyy-MM-dd'T'HH:mm:ss)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp("P2019-10-06T10:11:12", "'P'yyyy-MM-dd'T'HH:mm:ss")
 -- !query analysis
-Project [to_timestamp(P2019-10-06T10:11:12, Some('P'yyyy-MM-dd'T'HH:mm:ss), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(P2019-10-06T10:11:12, 'P'yyyy-MM-dd'T'HH:mm:ss)#x]
+Project [to_timestamp(P2019-10-06T10:11:12, Some('P'yyyy-MM-dd'T'HH:mm:ss), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(P2019-10-06T10:11:12, 'P'yyyy-MM-dd'T'HH:mm:ss)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp("16", "dd")
 -- !query analysis
-Project [to_timestamp(16, Some(dd), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(16, dd)#x]
+Project [to_timestamp(16, Some(dd), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(16, dd)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp("02-29", "MM-dd")
 -- !query analysis
-Project [to_timestamp(02-29, Some(MM-dd), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(02-29, MM-dd)#x]
+Project [to_timestamp(02-29, Some(MM-dd), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(02-29, MM-dd)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp("2019 40", "yyyy mm")
 -- !query analysis
-Project [to_timestamp(2019 40, Some(yyyy mm), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019 40, yyyy mm)#x]
+Project [to_timestamp(2019 40, Some(yyyy mm), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019 40, yyyy mm)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp("2019 10:10:10", "yyyy hh:mm:ss")
 -- !query analysis
-Project [to_timestamp(2019 10:10:10, Some(yyyy hh:mm:ss), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019 10:10:10, yyyy hh:mm:ss)#x]
+Project [to_timestamp(2019 10:10:10, Some(yyyy hh:mm:ss), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019 10:10:10, yyyy hh:mm:ss)#x]
 +- OneRowRelation
 
 
@@ -1494,49 +1507,13 @@ select timestamp'2019-10-06 10:11:12.345678' - date'2020-01-01'
 -- !query
 select timestamp'2011-11-11 11:11:11' - '2011-11-11 11:11:10'
 -- !query analysis
-org.apache.spark.sql.AnalysisException
-{
-  "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
-  "sqlState" : "42K09",
-  "messageParameters" : {
-    "inputSql" : "\"2011-11-11 11:11:10\"",
-    "inputType" : "\"STRING\"",
-    "paramIndex" : "2",
-    "requiredType" : "\"(TIMESTAMP OR TIMESTAMP WITHOUT TIME ZONE)\"",
-    "sqlExpr" : "\"(TIMESTAMP '2011-11-11 11:11:11' - 2011-11-11 11:11:10)\""
-  },
-  "queryContext" : [ {
-    "objectType" : "",
-    "objectName" : "",
-    "startIndex" : 8,
-    "stopIndex" : 61,
-    "fragment" : "timestamp'2011-11-11 11:11:11' - '2011-11-11 11:11:10'"
-  } ]
-}
+[Analyzer test output redacted due to nondeterminism]
 
 
 -- !query
 select '2011-11-11 11:11:11' - timestamp'2011-11-11 11:11:10'
 -- !query analysis
-org.apache.spark.sql.AnalysisException
-{
-  "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
-  "sqlState" : "42K09",
-  "messageParameters" : {
-    "inputSql" : "\"2011-11-11 11:11:11\"",
-    "inputType" : "\"STRING\"",
-    "paramIndex" : "1",
-    "requiredType" : "\"(TIMESTAMP OR TIMESTAMP WITHOUT TIME ZONE)\"",
-    "sqlExpr" : "\"(2011-11-11 11:11:11 - TIMESTAMP '2011-11-11 11:11:10')\""
-  },
-  "queryContext" : [ {
-    "objectType" : "",
-    "objectName" : "",
-    "startIndex" : 8,
-    "stopIndex" : 61,
-    "fragment" : "'2011-11-11 11:11:11' - timestamp'2011-11-11 11:11:10'"
-  } ]
-}
+[Analyzer test output redacted due to nondeterminism]
 
 
 -- !query
@@ -1554,7 +1531,7 @@ select null - timestamp'2011-11-11 11:11:11'
 -- !query
 create temporary view ts_view as select '2011-11-11 11:11:11' str
 -- !query analysis
-CreateViewCommand `ts_view`, select '2011-11-11 11:11:11' str, false, false, LocalTempView, true
+CreateViewCommand `ts_view`, select '2011-11-11 11:11:11' str, false, false, LocalTempView, UNSUPPORTED, true
    +- Project [2011-11-11 11:11:11 AS str#x]
       +- OneRowRelation
 
@@ -1562,61 +1539,25 @@ CreateViewCommand `ts_view`, select '2011-11-11 11:11:11' str, false, false, Loc
 -- !query
 select str - timestamp'2011-11-11 11:11:11' from ts_view
 -- !query analysis
-org.apache.spark.sql.AnalysisException
-{
-  "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
-  "sqlState" : "42K09",
-  "messageParameters" : {
-    "inputSql" : "\"str\"",
-    "inputType" : "\"STRING\"",
-    "paramIndex" : "1",
-    "requiredType" : "\"(TIMESTAMP OR TIMESTAMP WITHOUT TIME ZONE)\"",
-    "sqlExpr" : "\"(str - TIMESTAMP '2011-11-11 11:11:11')\""
-  },
-  "queryContext" : [ {
-    "objectType" : "",
-    "objectName" : "",
-    "startIndex" : 8,
-    "stopIndex" : 43,
-    "fragment" : "str - timestamp'2011-11-11 11:11:11'"
-  } ]
-}
+[Analyzer test output redacted due to nondeterminism]
 
 
 -- !query
 select timestamp'2011-11-11 11:11:11' - str from ts_view
 -- !query analysis
-org.apache.spark.sql.AnalysisException
-{
-  "errorClass" : "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
-  "sqlState" : "42K09",
-  "messageParameters" : {
-    "inputSql" : "\"str\"",
-    "inputType" : "\"STRING\"",
-    "paramIndex" : "2",
-    "requiredType" : "\"(TIMESTAMP OR TIMESTAMP WITHOUT TIME ZONE)\"",
-    "sqlExpr" : "\"(TIMESTAMP '2011-11-11 11:11:11' - str)\""
-  },
-  "queryContext" : [ {
-    "objectType" : "",
-    "objectName" : "",
-    "startIndex" : 8,
-    "stopIndex" : 43,
-    "fragment" : "timestamp'2011-11-11 11:11:11' - str"
-  } ]
-}
+[Analyzer test output redacted due to nondeterminism]
 
 
 -- !query
 select timestamp'2011-11-11 11:11:11' + '1'
 -- !query analysis
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"TIMESTAMP\"",
-    "right" : "\"DOUBLE\"",
+    "actualDataType" : "\"TIMESTAMP\"",
+    "inputType" : "(\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\")",
     "sqlExpr" : "\"(TIMESTAMP '2011-11-11 11:11:11' + 1)\""
   },
   "queryContext" : [ {
@@ -1632,13 +1573,13 @@ org.apache.spark.sql.AnalysisException
 -- !query
 select '1' + timestamp'2011-11-11 11:11:11'
 -- !query analysis
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
-  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
+  "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE",
   "sqlState" : "42K09",
   "messageParameters" : {
-    "left" : "\"DOUBLE\"",
-    "right" : "\"TIMESTAMP\"",
+    "actualDataType" : "\"TIMESTAMP\"",
+    "inputType" : "(\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\")",
     "sqlExpr" : "\"(1 + TIMESTAMP '2011-11-11 11:11:11')\""
   },
   "queryContext" : [ {
@@ -1654,7 +1595,7 @@ org.apache.spark.sql.AnalysisException
 -- !query
 select timestamp'2011-11-11 11:11:11' + null
 -- !query analysis
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
   "sqlState" : "42K09",
@@ -1676,7 +1617,7 @@ org.apache.spark.sql.AnalysisException
 -- !query
 select null + timestamp'2011-11-11 11:11:11'
 -- !query analysis
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "DATATYPE_MISMATCH.BINARY_OP_DIFF_TYPES",
   "sqlState" : "42K09",
@@ -1717,35 +1658,35 @@ select date '2012-01-01' - interval 3 hours,
 -- !query
 select to_timestamp('2019-10-06 A', 'yyyy-MM-dd GGGGG')
 -- !query analysis
-Project [to_timestamp(2019-10-06 A, Some(yyyy-MM-dd GGGGG), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(2019-10-06 A, yyyy-MM-dd GGGGG)#x]
+Project [to_timestamp(2019-10-06 A, Some(yyyy-MM-dd GGGGG), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(2019-10-06 A, yyyy-MM-dd GGGGG)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('22 05 2020 Friday', 'dd MM yyyy EEEEEE')
 -- !query analysis
-Project [to_timestamp(22 05 2020 Friday, Some(dd MM yyyy EEEEEE), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(22 05 2020 Friday, dd MM yyyy EEEEEE)#x]
+Project [to_timestamp(22 05 2020 Friday, Some(dd MM yyyy EEEEEE), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(22 05 2020 Friday, dd MM yyyy EEEEEE)#x]
 +- OneRowRelation
 
 
 -- !query
 select to_timestamp('22 05 2020 Friday', 'dd MM yyyy EEEEE')
 -- !query analysis
-Project [to_timestamp(22 05 2020 Friday, Some(dd MM yyyy EEEEE), TimestampType, Some(America/Los_Angeles), false) AS to_timestamp(22 05 2020 Friday, dd MM yyyy EEEEE)#x]
+Project [to_timestamp(22 05 2020 Friday, Some(dd MM yyyy EEEEE), TimestampType, Some(America/Los_Angeles), true) AS to_timestamp(22 05 2020 Friday, dd MM yyyy EEEEE)#x]
 +- OneRowRelation
 
 
 -- !query
 select unix_timestamp('22 05 2020 Friday', 'dd MM yyyy EEEEE')
 -- !query analysis
-Project [unix_timestamp(22 05 2020 Friday, dd MM yyyy EEEEE, Some(America/Los_Angeles), false) AS unix_timestamp(22 05 2020 Friday, dd MM yyyy EEEEE)#xL]
+Project [unix_timestamp(22 05 2020 Friday, dd MM yyyy EEEEE, Some(America/Los_Angeles), true) AS unix_timestamp(22 05 2020 Friday, dd MM yyyy EEEEE)#xL]
 +- OneRowRelation
 
 
 -- !query
 select from_json('{"t":"26/October/2015"}', 't Timestamp', map('timestampFormat', 'dd/MMMMM/yyyy'))
 -- !query analysis
-Project [from_json(StructField(t,TimestampType,true), (timestampFormat,dd/MMMMM/yyyy), {"t":"26/October/2015"}, Some(America/Los_Angeles)) AS from_json({"t":"26/October/2015"})#x]
+Project [from_json(StructField(t,TimestampType,true), (timestampFormat,dd/MMMMM/yyyy), {"t":"26/October/2015"}, Some(America/Los_Angeles), false) AS from_json({"t":"26/October/2015"})#x]
 +- OneRowRelation
 
 
@@ -1781,6 +1722,50 @@ select timestampadd(SECOND, -1, date'2022-02-15')
 
 
 -- !query
+select timestampadd('MONTH', -1, timestamp'2022-02-14 01:02:03')
+-- !query analysis
+org.apache.spark.sql.catalyst.parser.ParseException
+{
+  "errorClass" : "INVALID_PARAMETER_VALUE.DATETIME_UNIT",
+  "sqlState" : "22023",
+  "messageParameters" : {
+    "functionName" : "`timestampadd`",
+    "invalidValue" : "'MONTH'",
+    "parameter" : "`unit`"
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 64,
+    "fragment" : "timestampadd('MONTH', -1, timestamp'2022-02-14 01:02:03')"
+  } ]
+}
+
+
+-- !query
+select timestampadd('SECOND', -1, date'2022-02-15')
+-- !query analysis
+org.apache.spark.sql.catalyst.parser.ParseException
+{
+  "errorClass" : "INVALID_PARAMETER_VALUE.DATETIME_UNIT",
+  "sqlState" : "22023",
+  "messageParameters" : {
+    "functionName" : "`timestampadd`",
+    "invalidValue" : "'SECOND'",
+    "parameter" : "`unit`"
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 51,
+    "fragment" : "timestampadd('SECOND', -1, date'2022-02-15')"
+  } ]
+}
+
+
+-- !query
 select timestampdiff(MONTH, timestamp'2022-02-14 01:02:03', timestamp'2022-01-14 01:02:03')
 -- !query analysis
 [Analyzer test output redacted due to nondeterminism]
@@ -1802,3 +1787,115 @@ select timestampdiff(YEAR, date'2022-02-15', date'2023-02-15')
 select timestampdiff(SECOND, date'2022-02-15', timestamp'2022-02-14 23:59:59')
 -- !query analysis
 [Analyzer test output redacted due to nondeterminism]
+
+
+-- !query
+select timestampdiff('MINUTE', timestamp'2022-02-14 01:02:03', timestamp'2022-02-14 02:00:03')
+-- !query analysis
+org.apache.spark.sql.catalyst.parser.ParseException
+{
+  "errorClass" : "INVALID_PARAMETER_VALUE.DATETIME_UNIT",
+  "sqlState" : "22023",
+  "messageParameters" : {
+    "functionName" : "`timestampdiff`",
+    "invalidValue" : "'MINUTE'",
+    "parameter" : "`unit`"
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 94,
+    "fragment" : "timestampdiff('MINUTE', timestamp'2022-02-14 01:02:03', timestamp'2022-02-14 02:00:03')"
+  } ]
+}
+
+
+-- !query
+select timestampdiff('YEAR', date'2022-02-15', date'2023-02-15')
+-- !query analysis
+org.apache.spark.sql.catalyst.parser.ParseException
+{
+  "errorClass" : "INVALID_PARAMETER_VALUE.DATETIME_UNIT",
+  "sqlState" : "22023",
+  "messageParameters" : {
+    "functionName" : "`timestampdiff`",
+    "invalidValue" : "'YEAR'",
+    "parameter" : "`unit`"
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 64,
+    "fragment" : "timestampdiff('YEAR', date'2022-02-15', date'2023-02-15')"
+  } ]
+}
+
+
+-- !query
+select timediff(QUARTER, timestamp'2023-08-10 01:02:03', timestamp'2022-01-14 01:02:03')
+-- !query analysis
+[Analyzer test output redacted due to nondeterminism]
+
+
+-- !query
+select timediff(HOUR, timestamp'2022-02-14 01:02:03', timestamp'2022-02-14 12:00:03')
+-- !query analysis
+[Analyzer test output redacted due to nondeterminism]
+
+
+-- !query
+select timediff(DAY, date'2022-02-15', date'2023-02-15')
+-- !query analysis
+[Analyzer test output redacted due to nondeterminism]
+
+
+-- !query
+select timediff(SECOND, date'2022-02-15', timestamp'2022-02-14 23:59:59')
+-- !query analysis
+[Analyzer test output redacted due to nondeterminism]
+
+
+-- !query
+select timediff('MINUTE', timestamp'2023-02-14 01:02:03', timestamp'2023-02-14 02:00:03')
+-- !query analysis
+org.apache.spark.sql.catalyst.parser.ParseException
+{
+  "errorClass" : "INVALID_PARAMETER_VALUE.DATETIME_UNIT",
+  "sqlState" : "22023",
+  "messageParameters" : {
+    "functionName" : "`timediff`",
+    "invalidValue" : "'MINUTE'",
+    "parameter" : "`unit`"
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 89,
+    "fragment" : "timediff('MINUTE', timestamp'2023-02-14 01:02:03', timestamp'2023-02-14 02:00:03')"
+  } ]
+}
+
+
+-- !query
+select timediff('YEAR', date'2020-02-15', date'2023-02-15')
+-- !query analysis
+org.apache.spark.sql.catalyst.parser.ParseException
+{
+  "errorClass" : "INVALID_PARAMETER_VALUE.DATETIME_UNIT",
+  "sqlState" : "22023",
+  "messageParameters" : {
+    "functionName" : "`timediff`",
+    "invalidValue" : "'YEAR'",
+    "parameter" : "`unit`"
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 59,
+    "fragment" : "timediff('YEAR', date'2020-02-15', date'2023-02-15')"
+  } ]
+}

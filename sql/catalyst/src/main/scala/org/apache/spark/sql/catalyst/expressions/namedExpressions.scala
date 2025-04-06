@@ -19,6 +19,7 @@ package org.apache.spark.sql.catalyst.expressions
 
 import java.util.{Objects, UUID}
 
+import org.apache.spark.{SparkException, SparkUnsupportedOperationException}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.catalyst.expressions.codegen._
@@ -27,6 +28,7 @@ import org.apache.spark.sql.catalyst.trees.TreePattern
 import org.apache.spark.sql.catalyst.trees.TreePattern._
 import org.apache.spark.sql.catalyst.types._
 import org.apache.spark.sql.catalyst.util.{quoteIfNeeded, METADATA_COL_ATTR_KEY}
+import org.apache.spark.sql.connector.catalog.MetadataColumn
 import org.apache.spark.sql.types._
 import org.apache.spark.util.collection.BitSet
 import org.apache.spark.util.collection.ImmutableBitSet
@@ -103,7 +105,8 @@ trait NamedExpression extends Expression {
   def newInstance(): NamedExpression
 }
 
-abstract class Attribute extends LeafExpression with NamedExpression with NullIntolerant {
+abstract class Attribute extends LeafExpression with NamedExpression {
+  override def nullIntolerant: Boolean = true
 
   @transient
   override lazy val references: AttributeSet = AttributeSet(this)
@@ -160,7 +163,7 @@ case class Alias(child: Expression, name: String)(
   /** Just a simple passthrough for code generation. */
   override def genCode(ctx: CodegenContext): ExprCode = child.genCode(ctx)
   override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
-    throw new IllegalStateException("Alias.doGenCode should not be called.")
+    throw SparkException.internalError("Alias.doGenCode should not be called.")
   }
 
   override def dataType: DataType = child.dataType
@@ -204,10 +207,18 @@ case class Alias(child: Expression, name: String)(
     ""
   }
 
+  /**
+   * This function is performance-sensitive, so we should avoid `MetadataBuilder` manipulation,
+   * because it performs heavy operations on maps
+   */
   private def removeNonInheritableMetadata(metadata: Metadata): Metadata = {
-    val builder = new MetadataBuilder().withMetadata(metadata)
-    nonInheritableMetadataKeys.foreach(builder.remove)
-    builder.build()
+    if (metadata.isEmpty || nonInheritableMetadataKeys.forall(!metadata.contains(_))) {
+      metadata
+    } else {
+      val builder = new MetadataBuilder().withMetadata(metadata)
+      nonInheritableMetadataKeys.foreach(builder.remove)
+      builder.build()
+    }
   }
 
   override def toString: String = s"$child AS $name#${exprId.id}$typeSuffix$delaySuffix"
@@ -394,19 +405,23 @@ case class PrettyAttribute(
   override def sql: String = toString
 
   override def withNullability(newNullability: Boolean): Attribute =
-    throw new UnsupportedOperationException
-  override def newInstance(): Attribute = throw new UnsupportedOperationException
+    throw SparkUnsupportedOperationException()
+  override def newInstance(): Attribute =
+    throw SparkUnsupportedOperationException()
   override def withQualifier(newQualifier: Seq[String]): Attribute =
-    throw new UnsupportedOperationException
-  override def withName(newName: String): Attribute = throw new UnsupportedOperationException
+    throw SparkUnsupportedOperationException()
+  override def withName(newName: String): Attribute =
+    throw SparkUnsupportedOperationException()
   override def withMetadata(newMetadata: Metadata): Attribute =
-    throw new UnsupportedOperationException
-  override def qualifier: Seq[String] = throw new UnsupportedOperationException
-  override def exprId: ExprId = throw new UnsupportedOperationException
+    throw SparkUnsupportedOperationException()
+  override def qualifier: Seq[String] =
+    throw SparkUnsupportedOperationException()
+  override def exprId: ExprId =
+    throw SparkUnsupportedOperationException()
   override def withExprId(newExprId: ExprId): Attribute =
-    throw new UnsupportedOperationException
+    throw SparkUnsupportedOperationException()
   override def withDataType(newType: DataType): Attribute =
-    throw new UnsupportedOperationException
+    throw SparkUnsupportedOperationException()
   override def nullable: Boolean = true
 }
 
@@ -459,6 +474,7 @@ case class LateralColumnAliasReference(ne: NamedExpression, nameParts: Seq[Strin
   override def dataType: DataType = ne.dataType
   override def prettyName: String = "lateralAliasReference"
   override def sql: String = s"$prettyName($name)"
+  override def toString: String = sql
 
   final override val nodePatterns: Seq[TreePattern] = Seq(LATERAL_COLUMN_ALIAS_REFERENCE)
 }
@@ -488,8 +504,41 @@ object MetadataAttribute {
     .putString(METADATA_COL_ATTR_KEY, name)
     .build()
 
+  def metadata(col: MetadataColumn): Metadata = {
+    val builder = new MetadataBuilder()
+    if (col.metadataInJSON != null) {
+      builder.withMetadata(Metadata.fromJson(col.metadataInJSON))
+    }
+    builder.putString(METADATA_COL_ATTR_KEY, col.name)
+    builder.build()
+  }
+
   def isValid(metadata: Metadata): Boolean =
     metadata.contains(METADATA_COL_ATTR_KEY)
+
+  def isPreservedOnDelete(attr: Attribute): Boolean = {
+    if (attr.metadata.contains(MetadataColumn.PRESERVE_ON_DELETE)) {
+      attr.metadata.getBoolean(MetadataColumn.PRESERVE_ON_DELETE)
+    } else {
+      MetadataColumn.PRESERVE_ON_DELETE_DEFAULT
+    }
+  }
+
+  def isPreservedOnUpdate(attr: Attribute): Boolean = {
+    if (attr.metadata.contains(MetadataColumn.PRESERVE_ON_UPDATE)) {
+      attr.metadata.getBoolean(MetadataColumn.PRESERVE_ON_UPDATE)
+    } else {
+      MetadataColumn.PRESERVE_ON_UPDATE_DEFAULT
+    }
+  }
+
+  def isPreservedOnReinsert(attr: Attribute): Boolean = {
+    if (attr.metadata.contains(MetadataColumn.PRESERVE_ON_REINSERT)) {
+      attr.metadata.getBoolean(MetadataColumn.PRESERVE_ON_REINSERT)
+    } else {
+      MetadataColumn.PRESERVE_ON_REINSERT_DEFAULT
+    }
+  }
 }
 
 /**
@@ -508,7 +557,7 @@ object MetadataAttributeWithLogicalName {
 
 object MetadataStructFieldWithLogicalName {
   def unapply(field: StructField): Option[(StructField, String)] = MetadataAttributeWithLogicalName
-    .unapply(field.toAttribute)
+    .unapply(DataTypeUtils.toAttribute(field))
     .map { case (_, name) => field -> name }
 }
 
@@ -566,7 +615,7 @@ object FileSourceMetadataAttribute {
   def isSupportedType(dataType: DataType): Boolean = PhysicalDataType(dataType) match {
     // PhysicalPrimitiveType covers: Boolean, Byte, Double, Float, Integer, Long, Null, Short
     case _: PhysicalPrimitiveType | _: PhysicalDecimalType => true
-    case PhysicalBinaryType | PhysicalStringType | PhysicalCalendarIntervalType => true
+    case PhysicalBinaryType | PhysicalStringType(_) | PhysicalCalendarIntervalType => true
     case _ => false
   }
 

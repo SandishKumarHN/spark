@@ -25,7 +25,9 @@ import scala.concurrent.duration.NANOSECONDS
 import scala.util.control.NonFatal
 
 import org.apache.spark.{broadcast, SparkException}
-import org.apache.spark.rdd.RDD
+import org.apache.spark.internal.LogKeys._
+import org.apache.spark.internal.MDC
+import org.apache.spark.rdd.{RDD, RDDOperationScope}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.UnsafeRow
 import org.apache.spark.sql.catalyst.plans.logical.Statistics
@@ -45,25 +47,70 @@ import org.apache.spark.util.{SparkFatalException, ThreadUtils}
 trait BroadcastExchangeLike extends Exchange {
 
   /**
-   * The broadcast job group ID
+   * The broadcast run ID in job tag
    */
-  def runId: UUID = UUID.randomUUID
+  val runId: UUID = UUID.randomUUID
+
+  /**
+   * The broadcast job tag
+   */
+  def jobTag: String = s"broadcast exchange (runId ${runId.toString})"
 
   /**
    * The asynchronous job that prepares the broadcast relation.
    */
   def relationFuture: Future[broadcast.Broadcast[Any]]
 
+  @transient
+  private lazy val promise = Promise[Unit]()
+
+  @transient
+  private lazy val scalaFuture: scala.concurrent.Future[Unit] = promise.future
+
+  @transient
+  private lazy val triggerFuture: Future[Any] = {
+    SQLExecution.withThreadLocalCaptured(session, BroadcastExchangeExec.executionContext) {
+      try {
+        // Trigger broadcast preparation which can involve expensive operations like waiting on
+        // subqueries and file listing.
+        executeQuery(null)
+        promise.trySuccess(())
+      } catch {
+        case e: Throwable =>
+          promise.tryFailure(e)
+          throw e
+      }
+    }
+  }
+
+  protected def completionFuture: scala.concurrent.Future[broadcast.Broadcast[Any]]
+
   /**
    * The asynchronous job that materializes the broadcast. It's used for registering callbacks on
    * `relationFuture`. Note that calling this method may not start the execution of broadcast job.
    * It also does the preparations work, such as waiting for the subqueries.
    */
-  final def submitBroadcastJob: scala.concurrent.Future[broadcast.Broadcast[Any]] = executeQuery {
-    completionFuture
+  final def submitBroadcastJob(): scala.concurrent.Future[broadcast.Broadcast[Any]] = {
+    triggerFuture
+    scalaFuture.flatMap { _ =>
+      RDDOperationScope.withScope(sparkContext, nodeName, false, true) {
+        completionFuture
+      }
+    }(BroadcastExchangeExec.executionContext)
   }
 
-  protected def completionFuture: scala.concurrent.Future[broadcast.Broadcast[Any]]
+  /**
+   * Cancels broadcast job with an optional reason.
+   */
+  final def cancelBroadcastJob(reason: Option[String]): Unit = {
+    if (!this.relationFuture.isDone) {
+      reason match {
+        case Some(r) => sparkContext.cancelJobsWithTag(this.jobTag, r)
+        case None => sparkContext.cancelJobsWithTag(this.jobTag)
+      }
+      this.relationFuture.cancel(true)
+    }
+  }
 
   /**
    * Returns the runtime statistics after broadcast materialization.
@@ -78,9 +125,6 @@ trait BroadcastExchangeLike extends Exchange {
 case class BroadcastExchangeExec(
     mode: BroadcastMode,
     child: SparkPlan) extends BroadcastExchangeLike {
-  import BroadcastExchangeExec._
-
-  override val runId: UUID = UUID.randomUUID
 
   override lazy val metrics = Map(
     "dataSize" -> SQLMetrics.createSizeMetric(sparkContext, "data size"),
@@ -129,9 +173,9 @@ case class BroadcastExchangeExec(
     SQLExecution.withThreadLocalCaptured[broadcast.Broadcast[Any]](
       session, BroadcastExchangeExec.executionContext) {
           try {
-            // Setup a job group here so later it may get cancelled by groupId if necessary.
-            sparkContext.setJobGroup(runId.toString, s"broadcast exchange (runId $runId)",
-              interruptOnCancel = true)
+            // Setup a job tag here so later it may get cancelled by tag if necessary.
+            sparkContext.addJobTag(jobTag)
+            sparkContext.setInterruptOnCancel(true)
             val beforeCollect = System.nanoTime()
             // Use executeCollect/executeCollectIterator to avoid conversion to Scala types
             val (numRows, input) = child.executeCollectIterator()
@@ -158,9 +202,10 @@ case class BroadcastExchangeExec(
             }
 
             longMetric("dataSize") += dataSize
-            if (dataSize >= MAX_BROADCAST_TABLE_BYTES) {
+            val maxBroadcastTableSizeInBytes = conf.maxBroadcastTableSizeInBytes
+            if (dataSize >= maxBroadcastTableSizeInBytes) {
               throw QueryExecutionErrors.cannotBroadcastTableOverMaxTableBytesError(
-                MAX_BROADCAST_TABLE_BYTES, dataSize)
+                maxBroadcastTableSizeInBytes, dataSize)
             }
 
             val beforeBroadcast = System.nanoTime()
@@ -209,9 +254,9 @@ case class BroadcastExchangeExec(
       relationFuture.get(timeout, TimeUnit.SECONDS).asInstanceOf[broadcast.Broadcast[T]]
     } catch {
       case ex: TimeoutException =>
-        logError(s"Could not execute broadcast in $timeout secs.", ex)
+        logError(log"Could not execute broadcast in ${MDC(TIMEOUT, timeout)} secs.", ex)
         if (!relationFuture.isDone) {
-          sparkContext.cancelJobGroup(runId.toString)
+          sparkContext.cancelJobsWithTag(jobTag, "The corresponding broadcast query has failed.")
           relationFuture.cancel(true)
         }
         throw QueryExecutionErrors.executeBroadcastTimeoutError(timeout, Some(ex))
@@ -223,8 +268,6 @@ case class BroadcastExchangeExec(
 }
 
 object BroadcastExchangeExec {
-  val MAX_BROADCAST_TABLE_BYTES = 8L << 30
-
   private[execution] val executionContext = ExecutionContext.fromExecutorService(
       ThreadUtils.newDaemonCachedThreadPool("broadcast-exchange",
         SQLConf.get.getConf(StaticSQLConf.BROADCAST_EXCHANGE_MAX_THREAD_THRESHOLD)))

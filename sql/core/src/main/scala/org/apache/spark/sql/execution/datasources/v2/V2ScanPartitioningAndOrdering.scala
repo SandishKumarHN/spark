@@ -16,13 +16,14 @@
  */
 package org.apache.spark.sql.execution.datasources.v2
 
-import org.apache.spark.internal.Logging
-import org.apache.spark.sql.catalyst.SQLConfHelper
+import org.apache.spark.internal.{Logging, MDC}
+import org.apache.spark.internal.LogKeys.CLASS_NAME
 import org.apache.spark.sql.catalyst.expressions.V2ExpressionUtils
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.connector.read.{SupportsReportOrdering, SupportsReportPartitioning}
 import org.apache.spark.sql.connector.read.partitioning.{KeyGroupedPartitioning, UnknownPartitioning}
+import org.apache.spark.util.ArrayImplicits._
 import org.apache.spark.util.collection.Utils.sequenceToOption
 
 /**
@@ -30,7 +31,7 @@ import org.apache.spark.util.collection.Utils.sequenceToOption
  * and ordering reported by data sources to their catalyst counterparts. Then, annotates the plan
  * with the partitioning and ordering result.
  */
-object V2ScanPartitioningAndOrdering extends Rule[LogicalPlan] with SQLConfHelper with Logging {
+object V2ScanPartitioningAndOrdering extends Rule[LogicalPlan] with Logging {
   override def apply(plan: LogicalPlan): LogicalPlan = {
     val scanRules = Seq[LogicalPlan => LogicalPlan] (partitioning, ordering)
 
@@ -44,7 +45,8 @@ object V2ScanPartitioningAndOrdering extends Rule[LogicalPlan] with SQLConfHelpe
       val catalystPartitioning = scan.outputPartitioning() match {
         case kgp: KeyGroupedPartitioning =>
           val partitioning = sequenceToOption(
-            kgp.keys().map(V2ExpressionUtils.toCatalystOpt(_, relation, relation.funCatalog)))
+            kgp.keys().map(V2ExpressionUtils.toCatalystOpt(_, relation, relation.funCatalog))
+              .toImmutableArraySeq)
           if (partitioning.isEmpty) {
             None
           } else {
@@ -56,8 +58,9 @@ object V2ScanPartitioningAndOrdering extends Rule[LogicalPlan] with SQLConfHelpe
           }
         case _: UnknownPartitioning => None
         case p =>
-          logWarning(s"Spark ignores the partitioning ${p.getClass.getSimpleName}." +
-            " Please use KeyGroupedPartitioning for better performance")
+          logWarning(
+            log"Spark ignores the partitioning ${MDC(CLASS_NAME, p.getClass.getSimpleName)}. " +
+              log"Please use KeyGroupedPartitioning for better performance")
           None
       }
 

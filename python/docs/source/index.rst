@@ -24,7 +24,7 @@ PySpark Overview
 **Date**: |today| **Version**: |release|
 
 **Useful links**:
-|binder|_ | `GitHub <https://github.com/apache/spark>`_ | `Issues <https://issues.apache.org/jira/projects/SPARK/issues>`_ | |examples|_ | `Community <https://spark.apache.org/community.html>`_
+|binder|_ | `GitHub <https://github.com/apache/spark>`_ | `Issues <https://issues.apache.org/jira/projects/SPARK/issues>`_ | |examples|_ | `Community <https://spark.apache.org/community.html>`_ | `Stack Overflow <https://stackoverflow.com/questions/tagged/pyspark>`_ | `Dev Mailing List <https://lists.apache.org/list.html?dev@spark.apache.org>`_ | `User Mailing List <https://lists.apache.org/list.html?user@spark.apache.org>`_
 
 PySpark is the Python API for Apache Spark. It enables you to perform real-time,
 large-scale data processing in a distributed environment using Python. It also provides a PySpark
@@ -35,6 +35,18 @@ to enable processing and analysis of data at any size for everyone familiar with
 
 PySpark supports all of Spark's features such as Spark SQL,
 DataFrames, Structured Streaming, Machine Learning (MLlib) and Spark Core.
+
+.. list-table::
+   :widths: 10 80 10
+   :header-rows: 0
+   :class: borderless spec_table
+
+   * -
+     - .. image:: ../../../docs/img/pyspark-python_spark_connect_client.png
+          :target: getting_started/quickstart_connect.html
+          :width: 100%
+          :alt: Python Spark Connect Client
+     -
 
 .. list-table::
    :widths: 10 20 20 20 20 10
@@ -71,6 +83,19 @@ DataFrames, Structured Streaming, Machine Learning (MLlib) and Spark Core.
           :width: 100%
           :alt: Spark Core and RDDs
      -
+
+.. _Index Page - Python Spark Connect Client:
+
+**Python Spark Connect Client**
+
+Spark Connect is a client-server architecture within Apache Spark that
+enables remote connectivity to Spark clusters from any application.
+PySpark provides the client for the Spark Connect server, allowing
+Spark to be used as a service.
+
+- :ref:`/getting_started/quickstart_connect.ipynb`
+- |binder_connect|_
+- `Spark Connect Overview <https://spark.apache.org/docs/latest/spark-connect-overview.html>`_
 
 .. _Index Page - Spark SQL and DataFrames:
 

@@ -21,12 +21,13 @@ import scala.reflect.ClassTag
 
 import org.apache.spark.AccumulatorSuite
 import org.apache.spark.internal.config.EXECUTOR_MEMORY
-import org.apache.spark.sql.{Dataset, QueryTest, Row, SparkSession}
+import org.apache.spark.sql.{QueryTest, Row}
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, BitwiseAnd, BitwiseOr, Cast, Expression, Literal, ShiftLeft}
 import org.apache.spark.sql.catalyst.optimizer.{BuildLeft, BuildRight, BuildSide}
 import org.apache.spark.sql.catalyst.plans.Inner
 import org.apache.spark.sql.catalyst.plans.logical.BROADCAST
 import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, PartitioningCollection}
+import org.apache.spark.sql.classic.{Dataset, SparkSession}
 import org.apache.spark.sql.execution.{DummySparkPlan, SparkPlan, WholeStageCodegenExec}
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanHelper, DisableAdaptiveExecutionSuite, EnableAdaptiveExecutionSuite}
 import org.apache.spark.sql.execution.columnar.InMemoryTableScanExec
@@ -35,6 +36,7 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.test.SQLTestUtils
 import org.apache.spark.sql.types.{LongType, ShortType}
+import org.apache.spark.tags.ExtendedSQLTest
 
 /**
  * Test various broadcast join operators.
@@ -674,6 +676,8 @@ abstract class BroadcastJoinSuiteBase extends QueryTest with SQLTestUtils
   }
 }
 
+@ExtendedSQLTest
 class BroadcastJoinSuite extends BroadcastJoinSuiteBase with DisableAdaptiveExecutionSuite
 
+@ExtendedSQLTest
 class BroadcastJoinSuiteAE extends BroadcastJoinSuiteBase with EnableAdaptiveExecutionSuite

@@ -22,12 +22,15 @@ import java.io.{ByteArrayInputStream, ByteArrayOutputStream, DataInputStream, Da
 import scala.collection.mutable
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.{functions, Column, DataFrame}
+import org.apache.spark.sql.{functions, Column}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Expression, UnsafeProjection, UnsafeRow}
 import org.apache.spark.sql.catalyst.expressions.aggregate.{ImperativeAggregate, TypedImperativeAggregate}
 import org.apache.spark.sql.catalyst.trees.UnaryLike
 import org.apache.spark.sql.catalyst.util.GenericArrayData
+import org.apache.spark.sql.classic.ClassicConversions._
+import org.apache.spark.sql.classic.DataFrame
+import org.apache.spark.sql.classic.ExpressionUtils.expression
 import org.apache.spark.sql.types._
 import org.apache.spark.util.Utils
 
@@ -57,8 +60,8 @@ object FrequentItems extends Logging {
     val sizeOfMap = (1 / support).toInt
 
     val frequentItemCols = cols.map { col =>
-      val aggExpr = new CollectFrequentItems(functions.col(col).expr, sizeOfMap)
-      Column(aggExpr.toAggregateExpression(isDistinct = false)).as(s"${col}_freqItems")
+      Column(new CollectFrequentItems(expression(functions.col(col)), sizeOfMap))
+        .as(s"${col}_freqItems")
     }
 
     df.select(frequentItemCols: _*)
@@ -96,10 +99,10 @@ case class CollectFrequentItems(
         val remainder = count - minCount
         if (remainder >= 0) {
           map += key -> count // something will get kicked out, so we can add this
-          map.retain((k, v) => v > minCount)
-          map.transform((k, v) => v - minCount)
+          map.filterInPlace((k, v) => v > minCount)
+          map.mapValuesInPlace((k, v) => v - minCount)
         } else {
-          map.transform((k, v) => v - count)
+          map.mapValuesInPlace((k, v) => v - count)
         }
       }
     }
@@ -122,7 +125,7 @@ case class CollectFrequentItems(
       input: mutable.Map[Any, Long]): mutable.Map[Any, Long] = {
     val otherIter = input.iterator
     while (otherIter.hasNext) {
-      val (key, count) = otherIter.next
+      val (key, count) = otherIter.next()
       add(buffer, key, count)
     }
     buffer

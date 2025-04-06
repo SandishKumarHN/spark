@@ -17,7 +17,6 @@
 
 package org.apache.spark.sql.execution.datasources
 
-import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.catalyst.catalog.BucketSpec
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
 import org.apache.spark.sql.catalyst.expressions.{Alias, Ascending, Attribute, AttributeMap, AttributeSet, BitwiseAnd, Empty2Null, Expression, HiveHash, Literal, NamedExpression, Pmod, SortOrder}
@@ -65,7 +64,7 @@ trait V1WriteCommand extends DataWritingCommand {
 /**
  * A rule that plans v1 write for [[V1WriteCommand]].
  */
-object V1Writes extends Rule[LogicalPlan] with SQLConfHelper {
+object V1Writes extends Rule[LogicalPlan] {
 
   import V1WritesUtils._
 
@@ -102,8 +101,8 @@ object V1Writes extends Rule[LogicalPlan] with SQLConfHelper {
     val requiredOrdering = write.requiredOrdering.map(_.transform {
       case a: Attribute => attrMap.getOrElse(a, a)
     }.asInstanceOf[SortOrder])
-    val outputOrdering = query.outputOrdering
-    val orderingMatched = isOrderingMatched(requiredOrdering, outputOrdering)
+    val outputOrdering = empty2NullPlan.outputOrdering
+    val orderingMatched = isOrderingMatched(requiredOrdering.map(_.child), outputOrdering)
     if (orderingMatched) {
       empty2NullPlan
     } else {
@@ -213,9 +212,9 @@ object V1WritesUtils {
     }
   }
 
-  def getWriteFilesOpt(child: SparkPlan): Option[WriteFilesExec] = {
+  def getWriteFilesOpt(child: SparkPlan): Option[WriteFilesExecBase] = {
     child.collectFirst {
-      case w: WriteFilesExec => w
+      case w: WriteFilesExecBase => w
     }
   }
 }

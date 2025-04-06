@@ -36,6 +36,7 @@ from collections.abc import Iterable
 from datetime import tzinfo
 from functools import reduce
 from io import BytesIO
+import pickle
 import json
 import warnings
 
@@ -43,12 +44,12 @@ import numpy as np
 import pandas as pd
 from pandas.api.types import (  # type: ignore[attr-defined]
     is_datetime64_dtype,
-    is_datetime64tz_dtype,
     is_list_like,
 )
 from pandas.tseries.offsets import DateOffset
 import pyarrow as pa
 import pyarrow.parquet as pq
+
 from pyspark.sql import functions as F, Column as PySparkColumn
 from pyspark.sql.functions import pandas_udf
 from pyspark.sql.types import (
@@ -65,10 +66,10 @@ from pyspark.sql.types import (
     StringType,
     DateType,
     StructType,
+    StructField,
     DataType,
 )
 from pyspark.sql.dataframe import DataFrame as PySparkDataFrame
-
 from pyspark import pandas as ps
 from pyspark.pandas._typing import Axis, Dtype, Label, Name
 from pyspark.pandas.base import IndexOpsMixin
@@ -83,20 +84,20 @@ from pyspark.pandas.utils import (
     validate_axis,
     log_advice,
 )
+from pyspark.pandas.config import get_option
 from pyspark.pandas.frame import DataFrame, _reduce_spark_multi
 from pyspark.pandas.internal import (
     InternalFrame,
+    InternalField,
     DEFAULT_SERIES_NAME,
     HIDDEN_COLUMNS,
     SPARK_INDEX_NAME_FORMAT,
+    NATURAL_ORDER_COLUMN_NAME,
 )
 from pyspark.pandas.series import Series, first_series
 from pyspark.pandas.spark.utils import as_nullable_spark_type, force_decimal_precision_scale
 from pyspark.pandas.indexes import Index, DatetimeIndex, TimedeltaIndex
 from pyspark.pandas.indexes.multi import MultiIndex
-
-# For Supporting Spark Connect
-from pyspark.sql.utils import is_remote
 
 __all__ = [
     "from_pandas",
@@ -129,6 +130,7 @@ __all__ = [
     "to_numeric",
     "broadcast",
     "read_orc",
+    "json_normalize",
 ]
 
 
@@ -140,14 +142,44 @@ def from_pandas(pobj: Union[pd.DataFrame, pd.Series, pd.Index]) -> Union[Series,
 
     Parameters
     ----------
-    pobj : pandas.DataFrame or pandas.Series
-        pandas DataFrame or Series to read.
+    pobj : pandas.DataFrame, pandas.Series or pandas.Index
+        pandas DataFrame, Series or Index to read.
 
     Returns
     -------
-    Series or DataFrame
-        If a pandas Series is passed in, this function returns a pandas-on-Spark Series.
+    DataFrame, Series or Index
         If a pandas DataFrame is passed in, this function returns a pandas-on-Spark DataFrame.
+        If a pandas Series is passed in, this function returns a pandas-on-Spark Series.
+        If a pandas Index is passed in, this function returns a pandas-on-Spark Index.
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> import pyspark.pandas as ps
+
+    Convert a pandas DataFrame:
+    >>> pdf = pd.DataFrame({'a': [1, 2, 3]})
+    >>> psdf = ps.from_pandas(pdf)
+    >>> psdf
+       a
+    0  1
+    1  2
+    2  3
+
+    Convert a pandas Series:
+    >>> pser = pd.Series([1, 2, 3])
+    >>> psser = ps.from_pandas(pser)
+    >>> psser
+    0    1
+    1    2
+    2    3
+    dtype: int64
+
+    Convert a pandas Index:
+    >>> pidx = pd.Index([1, 2, 3])
+    >>> psidx = ps.from_pandas(pidx)
+    >>> psidx
+    Index([1, 2, 3], dtype='int64')
     """
     if isinstance(pobj, pd.Series):
         return Series(pobj)
@@ -159,7 +191,8 @@ def from_pandas(pobj: Union[pd.DataFrame, pd.Series, pd.Index]) -> Union[Series,
         raise TypeError("Unknown data type: {}".format(type(pobj).__name__))
 
 
-_range = range  # built-in range
+# built-in range
+_range: Type[range] = range  # type: ignore[assignment]
 
 
 def range(
@@ -222,8 +255,6 @@ def read_csv(
     names: Optional[Union[str, List[str]]] = None,
     index_col: Optional[Union[str, List[str]]] = None,
     usecols: Optional[Union[List[int], List[str], Callable[[str], bool]]] = None,
-    squeeze: bool = False,
-    mangle_dupe_cols: bool = True,
     dtype: Optional[Union[str, Dtype, Dict[str, Union[str, Dtype]]]] = None,
     nrows: Optional[int] = None,
     parse_dates: bool = False,
@@ -262,19 +293,6 @@ def read_csv(
         from the document header row(s).
         If callable, the callable function will be evaluated against the column names,
         returning names where the callable function evaluates to `True`.
-    squeeze : bool, default False
-        If the parsed data only contains one column then return a Series.
-
-        .. deprecated:: 3.4.0
-
-    mangle_dupe_cols : bool, default True
-        Duplicate columns will be specified as 'X0', 'X1', ... 'XN', rather
-        than 'X' ... 'X'. Passing in False will cause data to be overwritten if
-        there are duplicate names in the columns.
-        Currently only `True` is allowed.
-
-        .. deprecated:: 3.4.0
-
     dtype : Type name or dict of column -> type, default None
         Data type for data or columns. E.g. {‘a’: np.float64, ‘b’: np.int32} Use str or object
         together with suitable na_values settings to preserve and not interpret dtype.
@@ -316,8 +334,6 @@ def read_csv(
     if "options" in options and isinstance(options.get("options"), dict) and len(options) == 1:
         options = options.get("options")
 
-    if mangle_dupe_cols is not True:
-        raise ValueError("mangle_dupe_cols can only be `True`: %s" % mangle_dupe_cols)
     if parse_dates is not False:
         raise ValueError("parse_dates can only be `False`: %s" % parse_dates)
 
@@ -466,10 +482,7 @@ def read_csv(
             for col in psdf.columns:
                 psdf[col] = psdf[col].astype(dtype)
 
-    if squeeze and len(psdf.columns) == 1:
-        return first_series(psdf)
-    else:
-        return psdf
+    return psdf
 
 
 def read_json(
@@ -711,20 +724,19 @@ def read_spark_io(
 
     See Also
     --------
-    DataFrame.to_spark_io
     DataFrame.read_table
     DataFrame.read_delta
     DataFrame.read_parquet
 
     Examples
     --------
-    >>> ps.range(1).to_spark_io('%s/read_spark_io/data.parquet' % path)
+    >>> ps.range(1).spark.to_spark_io('%s/read_spark_io/data.parquet' % path)
     >>> ps.read_spark_io(
     ...     '%s/read_spark_io/data.parquet' % path, format='parquet', schema='id long')
        id
     0   0
 
-    >>> ps.range(10, 15, num_partitions=1).to_spark_io('%s/read_spark_io/data.json' % path,
+    >>> ps.range(10, 15, num_partitions=1).spark.to_spark_io('%s/read_spark_io/data.json' % path,
     ...                                                format='json', lineSep='__')
     >>> ps.read_spark_io(
     ...     '%s/read_spark_io/data.json' % path, format='json', schema='id long', lineSep='__')
@@ -737,7 +749,7 @@ def read_spark_io(
 
     You can preserve the index in the roundtrip as below.
 
-    >>> ps.range(10, 15, num_partitions=1).to_spark_io('%s/read_spark_io/data.orc' % path,
+    >>> ps.range(10, 15, num_partitions=1).spark.to_spark_io('%s/read_spark_io/data.orc' % path,
     ...                                                format='orc', index_col="index")
     >>> ps.read_spark_io(
     ...     path=r'%s/read_spark_io/data.orc' % path, format="orc", index_col="index")
@@ -912,7 +924,6 @@ def read_excel(
     names: Optional[List] = None,
     index_col: Optional[List[int]] = None,
     usecols: Optional[Union[int, str, List[Union[int, str]], Callable[[str], bool]]] = None,
-    squeeze: bool = False,
     dtype: Optional[Dict[str, Union[str, Dtype]]] = None,
     engine: Optional[str] = None,
     converters: Optional[Dict] = None,
@@ -928,8 +939,6 @@ def read_excel(
     thousands: Optional[str] = None,
     comment: Optional[str] = None,
     skipfooter: int = 0,
-    convert_float: bool = True,
-    mangle_dupe_cols: bool = True,
     **kwds: Any,
 ) -> Union[DataFrame, Series, Dict[str, Union[DataFrame, Series]]]:
     """
@@ -985,11 +994,6 @@ def read_excel(
         * If list of string, then indicates list of column names to be parsed.
         * If callable, then evaluate each column name against it and parse the
           column if the callable returns ``True``.
-    squeeze : bool, default False
-        If the parsed data only contains one column then return a Series.
-
-        .. deprecated:: 3.4.0
-
     dtype : Type name or dict of column -> type, default None
         Data type for data or columns. E.g. {'a': np.float64, 'b': np.int32}
         Use `object` to preserve data as stored in Excel and not interpret dtype.
@@ -1057,20 +1061,6 @@ def read_excel(
         comment string and the end of the current line is ignored.
     skipfooter : int, default 0
         Rows at the end to skip (0-indexed).
-    convert_float : bool, default True
-        Convert integral floats to int (i.e., 1.0 --> 1). If False, all numeric
-        data will be read in as floats: Excel stores all numbers as floats
-        internally.
-
-        .. deprecated:: 3.4.0
-
-    mangle_dupe_cols : bool, default True
-        Duplicate columns will be specified as 'X', 'X.1', ...'X.N', rather than
-        'X'...'X'. Passing in False will cause data to be overwritten if there
-        are duplicate names in the columns.
-
-        .. deprecated:: 3.4.0
-
     **kwds : optional
         Optional keyword arguments can be passed to ``TextFileReader``.
 
@@ -1142,7 +1132,9 @@ def read_excel(
     """
 
     def pd_read_excel(
-        io_or_bin: Any, sn: Union[str, int, List[Union[str, int]], None], sq: bool
+        io_or_bin: Any,
+        sn: Union[str, int, List[Union[str, int]], None],
+        nr: Optional[int] = None,
     ) -> pd.DataFrame:
         return pd.read_excel(
             io=BytesIO(io_or_bin) if isinstance(io_or_bin, (bytes, bytearray)) else io_or_bin,
@@ -1151,14 +1143,13 @@ def read_excel(
             names=names,
             index_col=index_col,
             usecols=usecols,
-            squeeze=sq,
             dtype=dtype,
             engine=engine,
             converters=converters,
             true_values=true_values,
             false_values=false_values,
             skiprows=skiprows,
-            nrows=nrows,
+            nrows=nr,
             na_values=na_values,
             keep_default_na=keep_default_na,
             verbose=verbose,
@@ -1167,23 +1158,12 @@ def read_excel(
             thousands=thousands,
             comment=comment,
             skipfooter=skipfooter,
-            convert_float=convert_float,
-            mangle_dupe_cols=mangle_dupe_cols,
             **kwds,
         )
 
-    if isinstance(io, str):
-        # 'binaryFile' format is available since Spark 3.0.0.
-        binaries = default_session().read.format("binaryFile").load(io).select("content").head(2)
-        io_or_bin = binaries[0][0]
-        single_file = len(binaries) == 1
-    else:
-        io_or_bin = io
-        single_file = True
-
-    pdf_or_psers = pd_read_excel(io_or_bin, sn=sheet_name, sq=squeeze)
-
-    if single_file:
+    if not isinstance(io, str):
+        # When io is not a path, always need to load all data to python side
+        pdf_or_psers = pd_read_excel(io, sn=sheet_name, nr=nrows)
         if isinstance(pdf_or_psers, dict):
             return {
                 sn: cast(Union[DataFrame, Series], from_pandas(pdf_or_pser))
@@ -1191,58 +1171,89 @@ def read_excel(
             }
         else:
             return cast(Union[DataFrame, Series], from_pandas(pdf_or_psers))
-    else:
 
-        def read_excel_on_spark(
-            pdf_or_pser: Union[pd.DataFrame, pd.Series],
-            sn: Union[str, int, List[Union[str, int]], None],
-        ) -> Union[DataFrame, Series]:
-            if isinstance(pdf_or_pser, pd.Series):
-                pdf = pdf_or_pser.to_frame()
-            else:
-                pdf = pdf_or_pser
+    spark = default_session()
 
-            psdf = cast(DataFrame, from_pandas(pdf))
-            return_schema = force_decimal_precision_scale(
-                as_nullable_spark_type(psdf._internal.spark_frame.drop(*HIDDEN_COLUMNS).schema)
-            )
+    # Collect the first #nr rows from the first file
+    nr = get_option("compute.max_rows", 1000)
+    if nrows is not None and nrows < nr:
+        nr = nrows
 
-            def output_func(pdf: pd.DataFrame) -> pd.DataFrame:
-                pdf = pd.concat(
-                    [pd_read_excel(bin, sn=sn, sq=False) for bin in pdf[pdf.columns[0]]]
-                )
+    def sample_data(pdf: pd.DataFrame) -> pd.DataFrame:
+        raw_data = BytesIO(pdf.content[0])
+        pdf_or_dict = pd_read_excel(raw_data, sn=sheet_name, nr=nr)
+        return pd.DataFrame({"sampled": [pickle.dumps(pdf_or_dict)]})
 
-                reset_index = pdf.reset_index()
-                for name, col in reset_index.items():
-                    dt = col.dtype
-                    if is_datetime64_dtype(dt) or is_datetime64tz_dtype(dt):
-                        continue
-                    reset_index[name] = col.replace({np.nan: None})
-                pdf = reset_index
+    # 'binaryFile' format is available since Spark 3.0.0.
+    sampled = (
+        spark.read.format("binaryFile")
+        .load(io)
+        .select("content")
+        .limit(1)  # Read at most 1 file
+        .mapInPandas(func=lambda iterator: map(sample_data, iterator), schema="sampled BINARY")
+        .head()
+    )
+    sampled = pickle.loads(sampled[0])
 
-                # Just positionally map the column names to given schema's.
-                return pdf.rename(columns=dict(zip(pdf.columns, return_schema.names)))
-
-            sdf = (
-                default_session()
-                .read.format("binaryFile")
-                .load(io)
-                .select("content")
-                .mapInPandas(lambda iterator: map(output_func, iterator), schema=return_schema)
-            )
-
-            psdf = DataFrame(psdf._internal.with_new_sdf(sdf))
-            if squeeze and len(psdf.columns) == 1:
-                return first_series(psdf)
-            else:
-                return psdf
-
-        if isinstance(pdf_or_psers, dict):
-            return {
-                sn: read_excel_on_spark(pdf_or_pser, sn) for sn, pdf_or_pser in pdf_or_psers.items()
-            }
+    def read_excel_on_spark(
+        pdf_or_pser: Union[pd.DataFrame, pd.Series],
+        sn: Union[str, int, List[Union[str, int]], None],
+    ) -> Union[DataFrame, Series]:
+        if isinstance(pdf_or_pser, pd.Series):
+            pdf = pdf_or_pser.to_frame()
         else:
-            return read_excel_on_spark(pdf_or_psers, sheet_name)
+            pdf = pdf_or_pser
+
+        psdf = cast(DataFrame, from_pandas(pdf))
+
+        raw_schema = psdf._internal.spark_frame.drop(*HIDDEN_COLUMNS).schema
+        index_scol_names = psdf._internal.index_spark_column_names
+        nullable_fields = []
+        for field in raw_schema.fields:
+            if field.name in index_scol_names:
+                nullable_fields.append(field)
+            else:
+                nullable_fields.append(
+                    StructField(
+                        field.name,
+                        as_nullable_spark_type(field.dataType),
+                        nullable=True,
+                        metadata=field.metadata,
+                    )
+                )
+        nullable_schema = StructType(nullable_fields)
+        return_schema = force_decimal_precision_scale(nullable_schema)
+
+        return_data_fields: Optional[List[InternalField]] = None
+        if psdf._internal.data_fields is not None:
+            return_data_fields = [f.normalize_spark_type() for f in psdf._internal.data_fields]
+
+        def output_func(pdf: pd.DataFrame) -> pd.DataFrame:
+            pdf = pd.concat([pd_read_excel(bin, sn=sn, nr=nrows) for bin in pdf[pdf.columns[0]]])
+
+            reset_index = pdf.reset_index()
+            for name, col in reset_index.items():
+                dt = col.dtype
+                if is_datetime64_dtype(dt) or isinstance(dt, pd.DatetimeTZDtype):
+                    continue
+                reset_index[name] = col.replace({np.nan: None})
+            pdf = reset_index
+
+            # Just positionally map the column names to given schema's.
+            return pdf.rename(columns=dict(zip(pdf.columns, return_schema.names)))
+
+        sdf = (
+            spark.read.format("binaryFile")
+            .load(io)
+            .select("content")
+            .mapInPandas(lambda iterator: map(output_func, iterator), schema=return_schema)
+        )
+        return DataFrame(psdf._internal.with_new_sdf(sdf, data_fields=return_data_fields))
+
+    if isinstance(sampled, dict):
+        return {sn: read_excel_on_spark(pdf_or_pser, sn) for sn, pdf_or_pser in sampled.items()}
+    else:
+        return read_excel_on_spark(cast(Union[pd.DataFrame, pd.Series], sampled), sheet_name)
 
 
 def read_html(
@@ -1270,6 +1281,10 @@ def read_html(
         A URL, a file-like object, or a raw string containing HTML. Note that
         lxml only accepts the http, FTP and file URL protocols. If you have a
         URL that starts with ``'https'`` you might try removing the ``'s'``.
+
+        .. deprecated:: 4.0.0
+            Passing html literal strings is deprecated.
+            Wrap literal string/bytes input in io.StringIO/io.BytesIO instead.
 
     match : str or compiled regular expression, optional
         The set of tables containing text matching this regex or string will be
@@ -1650,7 +1665,7 @@ def to_datetime(
     Passing errors='coerce' will force an out-of-bounds date to NaT,
     in addition to forcing non-dates (or non-parseable dates) to NaT.
 
-    >>> ps.to_datetime('13000101', format='%Y%m%d', errors='ignore')
+    >>> ps.to_datetime('13000101', format='%Y%m%d', errors='ignore')  # doctest: +SKIP
     datetime.datetime(1300, 1, 1, 0, 0)
     >>> ps.to_datetime('13000101', format='%Y%m%d', errors='coerce')
     NaT
@@ -1751,8 +1766,6 @@ def to_datetime(
     )
 
 
-# TODO(SPARK-42621): Add `inclusive` parameter and replace `closed`.
-# See https://github.com/pandas-dev/pandas/issues/40245
 def date_range(
     start: Union[str, Any] = None,
     end: Union[str, Any] = None,
@@ -1761,7 +1774,7 @@ def date_range(
     tz: Optional[Union[str, tzinfo]] = None,
     normalize: bool = False,
     name: Optional[str] = None,
-    closed: Optional[str] = None,
+    inclusive: str = "both",
     **kwargs: Any,
 ) -> DatetimeIndex:
     """
@@ -1785,11 +1798,10 @@ def date_range(
         Normalize start/end dates to midnight before generating date range.
     name : str, default None
         Name of the resulting DatetimeIndex.
-    closed : {None, 'left', 'right'}, optional
-        Make the interval closed with respect to the given frequency to
-        the 'left', 'right', or both sides (None, the default).
+    inclusive : {"both", "neither", "left", "right"}, default "both"
+        Include boundaries; Whether to set each bound as closed or open.
 
-        .. deprecated:: 3.4.0
+        .. versionadded:: 4.0.0
 
     **kwargs
         For compatibility. Has no effect on the result.
@@ -1821,21 +1833,21 @@ def date_range(
 
     Specify `start` and `end`, with the default daily frequency.
 
-    >>> ps.date_range(start='1/1/2018', end='1/08/2018')  # doctest: +NORMALIZE_WHITESPACE
+    >>> ps.date_range(start='1/1/2018', end='1/08/2018')  # doctest: +SKIP
     DatetimeIndex(['2018-01-01', '2018-01-02', '2018-01-03', '2018-01-04',
                    '2018-01-05', '2018-01-06', '2018-01-07', '2018-01-08'],
                   dtype='datetime64[ns]', freq=None)
 
     Specify `start` and `periods`, the number of periods (days).
 
-    >>> ps.date_range(start='1/1/2018', periods=8)  # doctest: +NORMALIZE_WHITESPACE
+    >>> ps.date_range(start='1/1/2018', periods=8)  # doctest: +SKIP
     DatetimeIndex(['2018-01-01', '2018-01-02', '2018-01-03', '2018-01-04',
                    '2018-01-05', '2018-01-06', '2018-01-07', '2018-01-08'],
                   dtype='datetime64[ns]', freq=None)
 
     Specify `end` and `periods`, the number of periods (days).
 
-    >>> ps.date_range(end='1/1/2018', periods=8)  # doctest: +NORMALIZE_WHITESPACE
+    >>> ps.date_range(end='1/1/2018', periods=8)  # doctest: +SKIP
     DatetimeIndex(['2017-12-25', '2017-12-26', '2017-12-27', '2017-12-28',
                    '2017-12-29', '2017-12-30', '2017-12-31', '2018-01-01'],
                   dtype='datetime64[ns]', freq=None)
@@ -1845,7 +1857,7 @@ def date_range(
 
     >>> ps.date_range(
     ...     start='2018-04-24', end='2018-04-27', periods=3
-    ... )  # doctest: +NORMALIZE_WHITESPACE
+    ... )  # doctest: +SKIP
     DatetimeIndex(['2018-04-24 00:00:00', '2018-04-25 12:00:00',
                    '2018-04-27 00:00:00'],
                   dtype='datetime64[ns]', freq=None)
@@ -1854,14 +1866,14 @@ def date_range(
 
     Changed the `freq` (frequency) to ``'M'`` (month end frequency).
 
-    >>> ps.date_range(start='1/1/2018', periods=5, freq='M')  # doctest: +NORMALIZE_WHITESPACE
+    >>> ps.date_range(start='1/1/2018', periods=5, freq='ME')  # doctest: +SKIP
     DatetimeIndex(['2018-01-31', '2018-02-28', '2018-03-31', '2018-04-30',
                    '2018-05-31'],
                   dtype='datetime64[ns]', freq=None)
 
     Multiples are allowed
 
-    >>> ps.date_range(start='1/1/2018', periods=5, freq='3M')  # doctest: +NORMALIZE_WHITESPACE
+    >>> ps.date_range(start='1/1/2018', periods=5, freq='3M')  # doctest: +SKIP
     DatetimeIndex(['2018-01-31', '2018-04-30', '2018-07-31', '2018-10-31',
                    '2019-01-31'],
                   dtype='datetime64[ns]', freq=None)
@@ -1870,31 +1882,31 @@ def date_range(
 
     >>> ps.date_range(
     ...     start='1/1/2018', periods=5, freq=pd.offsets.MonthEnd(3)
-    ... )  # doctest: +NORMALIZE_WHITESPACE
+    ... )  # doctest: +SKIP
     DatetimeIndex(['2018-01-31', '2018-04-30', '2018-07-31', '2018-10-31',
                    '2019-01-31'],
                   dtype='datetime64[ns]', freq=None)
 
-    `closed` controls whether to include `start` and `end` that are on the
+    `inclusive` controls whether to include `start` and `end` that are on the
     boundary. The default includes boundary points on either end.
 
     >>> ps.date_range(
-    ...     start='2017-01-01', end='2017-01-04', closed=None
+    ...     start='2017-01-01', end='2017-01-04', inclusive="both"
     ... )  # doctest: +NORMALIZE_WHITESPACE
     DatetimeIndex(['2017-01-01', '2017-01-02', '2017-01-03', '2017-01-04'],
                    dtype='datetime64[ns]', freq=None)
 
-    Use ``closed='left'`` to exclude `end` if it falls on the boundary.
+    Use ``inclusive='left'`` to exclude `end` if it falls on the boundary.
 
     >>> ps.date_range(
-    ...     start='2017-01-01', end='2017-01-04', closed='left'
+    ...     start='2017-01-01', end='2017-01-04', inclusive='left'
     ... )  # doctest: +NORMALIZE_WHITESPACE
     DatetimeIndex(['2017-01-01', '2017-01-02', '2017-01-03'], dtype='datetime64[ns]', freq=None)
 
-    Use ``closed='right'`` to exclude `start` if it falls on the boundary.
+    Use ``inclusive='right'`` to exclude `start` if it falls on the boundary.
 
     >>> ps.date_range(
-    ...     start='2017-01-01', end='2017-01-04', closed='right'
+    ...     start='2017-01-01', end='2017-01-04', inclusive='right'
     ... )  # doctest: +NORMALIZE_WHITESPACE
     DatetimeIndex(['2017-01-02', '2017-01-03', '2017-01-04'], dtype='datetime64[ns]', freq=None)
     """
@@ -1912,7 +1924,7 @@ def date_range(
                 tz=tz,
                 normalize=normalize,
                 name=name,
-                closed=closed,
+                inclusive=inclusive,
                 **kwargs,
             )
         ),
@@ -1946,6 +1958,10 @@ def to_timedelta(
         * 'ns' / 'nanoseconds' / 'nano' / 'nanos' / 'nanosecond' / 'N'
 
         Must not be specified when `arg` context strings and ``errors="raise"``.
+
+        .. deprecated:: 4.0.0
+            Units 'T' and 'L' are deprecated and will be removed in a future version.
+
     errors : {'ignore', 'raise', 'coerce'}, default 'raise'
         - If 'raise', then invalid parsing will raise an exception.
         - If 'coerce', then invalid parsing will be set as NaT.
@@ -2303,10 +2319,10 @@ def get_dummies(
             values = values[1:]
 
         def column_name(v: Any) -> Name:
-            if prefix is None or cast(List[str], prefix)[i] == "":
+            if prefix is None or prefix[i] == "":  # type: ignore[index]
                 return v
             else:
-                return "{}{}{}".format(cast(List[str], prefix)[i], prefix_sep, v)
+                return "{}{}{}".format(prefix[i], prefix_sep, v)  # type: ignore[index]
 
         for value in values:
             remaining_columns.append(
@@ -2360,7 +2376,6 @@ def concat(
 
     See Also
     --------
-    Series.append : Concatenate Series.
     DataFrame.join : Join DataFrames using indexes.
     DataFrame.merge : Merge DataFrames by indexes or columns.
 
@@ -2498,6 +2513,16 @@ def concat(
     if join not in ["inner", "outer"]:
         raise ValueError("Only can inner (intersect) or outer (union) join the other axis.")
 
+    if all([obj.empty for obj in objs]):
+        warnings.warn(
+            "The behavior of array concatenation with empty entries is "
+            "deprecated. In a future version, this will no longer exclude "
+            "empty items when determining the result dtype. "
+            "To retain the old behavior, exclude the empty entries before "
+            "the concat operation.",
+            FutureWarning,
+        )
+
     axis = validate_axis(axis)
     psdf: DataFrame
     if axis == 1:
@@ -2573,6 +2598,10 @@ def concat(
         if sort:
             concat_psdf = concat_psdf.sort_index()
 
+        columns = concat_psdf.columns
+        if isinstance(columns, pd.MultiIndex):
+            concat_psdf = concat_psdf.rename_axis([None] * columns.nlevels, axis="columns")
+
         return concat_psdf
 
     # Series, Series ...
@@ -2588,7 +2617,10 @@ def concat(
         if isinstance(obj, Series):
             num_series += 1
             series_names.add(obj.name)
-            new_objs.append(obj.to_frame(DEFAULT_SERIES_NAME))
+            if not ignore_index and not should_return_series:
+                new_objs.append(obj.to_frame())
+            else:
+                new_objs.append(obj.to_frame(DEFAULT_SERIES_NAME))
         else:
             assert isinstance(obj, DataFrame)
             new_objs.append(obj)
@@ -2846,7 +2878,7 @@ def notna(obj):
     --------
     Show which entries in a DataFrame are not NA.
 
-    >>> df = ps.DataFrame({'age': [5, 6, np.NaN],
+    >>> df = ps.DataFrame({'age': [5, 6, np.nan],
     ...                    'born': [pd.NaT, pd.Timestamp('1939-05-27'),
     ...                             pd.Timestamp('1940-04-25')],
     ...                    'name': ['Alfred', 'Batman', ''],
@@ -2865,7 +2897,7 @@ def notna(obj):
 
     Show which entries in a Series are not NA.
 
-    >>> ser = ps.Series([5, 6, np.NaN])
+    >>> ser = ps.Series([5, 6, np.nan])
     >>> ser
     0    5.0
     1    6.0
@@ -3273,7 +3305,7 @@ def merge_asof(
     ...     quotes,
     ...     on="time",
     ...     by="ticker",
-    ...     tolerance=F.expr("INTERVAL 2 MILLISECONDS")  # pd.Timedelta("2ms")
+    ...     tolerance=sf.expr("INTERVAL 2 MILLISECONDS")  # pd.Timedelta("2ms")
     ... ).sort_values(["time", "ticker", "price"]).reset_index(drop=True)
                          time ticker   price  quantity     bid     ask
     0 2016-05-25 13:30:00.023   MSFT   51.95        75   51.95   51.96
@@ -3291,7 +3323,7 @@ def merge_asof(
     ...     quotes,
     ...     on="time",
     ...     by="ticker",
-    ...     tolerance=F.expr("INTERVAL 10 MILLISECONDS"),  # pd.Timedelta("10ms")
+    ...     tolerance=sf.expr("INTERVAL 10 MILLISECONDS"),  # pd.Timedelta("10ms")
     ...     allow_exact_matches=False
     ... ).sort_values(["time", "ticker", "price"]).reset_index(drop=True)
                          time ticker   price  quantity     bid     ask
@@ -3429,13 +3461,7 @@ def merge_asof(
     else:
         on = None
 
-    if is_remote():
-        from pyspark.sql.connect.column import Column as ConnectColumn
-
-        Column = ConnectColumn
-    else:
-        Column = PySparkColumn  # type: ignore[assignment]
-    if tolerance is not None and not isinstance(tolerance, Column):
+    if tolerance is not None and not isinstance(tolerance, PySparkColumn):
         tolerance = F.lit(tolerance)
 
     as_of_joined_table = left_table._joinAsOf(
@@ -3460,10 +3486,10 @@ def merge_asof(
     data_columns = []
     column_labels = []
 
-    def left_scol_for(label: Label) -> Column:  # type: ignore[valid-type]
+    def left_scol_for(label: Label) -> PySparkColumn:
         return scol_for(as_of_joined_table, left_internal.spark_column_name_for(label))
 
-    def right_scol_for(label: Label) -> Column:  # type: ignore[valid-type]
+    def right_scol_for(label: Label) -> PySparkColumn:
         return scol_for(as_of_joined_table, right_internal.spark_column_name_for(label))
 
     for label in left_internal.column_labels:
@@ -3477,7 +3503,7 @@ def merge_asof(
                 pass
             else:
                 col = col + left_suffix
-                scol = scol.alias(col)  # type: ignore[attr-defined]
+                scol = scol.alias(col)
                 label = tuple([str(label[0]) + left_suffix] + list(label[1:]))
         exprs.append(scol)
         data_columns.append(col)
@@ -3485,7 +3511,7 @@ def merge_asof(
     for label in right_internal.column_labels:
         # recover `right_prefix` here.
         col = right_internal.spark_column_name_for(label)[len(right_prefix) :]
-        scol = right_scol_for(label).alias(col)  # type: ignore[attr-defined]
+        scol = right_scol_for(label).alias(col)
         if label in duplicate_columns:
             spark_column_name = left_internal.spark_column_name_for(label)
             if spark_column_name in left_as_of_names + left_join_on_names and (
@@ -3494,7 +3520,7 @@ def merge_asof(
                 continue
             else:
                 col = col + right_suffix
-                scol = scol.alias(col)  # type: ignore[attr-defined]
+                scol = scol.alias(col)
                 label = tuple([str(label[0]) + right_suffix] + list(label[1:]))
         exprs.append(scol)
         data_columns.append(col)
@@ -3727,6 +3753,82 @@ def read_orc(
     return psdf
 
 
+def json_normalize(
+    data: Union[Dict, List[Dict]],
+    sep: str = ".",
+) -> DataFrame:
+    """
+    Normalize semi-structured JSON data into a flat table.
+
+    .. versionadded:: 4.0.0
+
+    Parameters
+    ----------
+    data : dict or list of dicts
+        Unserialized JSON objects.
+    sep : str, default '.'
+        Nested records will generate names separated by sep.
+
+    Returns
+    -------
+    DataFrame
+
+    See Also
+    --------
+    DataFrame.to_json : Convert the pandas-on-Spark DataFrame to a JSON string.
+
+    Examples
+    --------
+    >>> data = [
+    ...     {"id": 1, "name": "Alice", "address": {"city": "NYC", "zipcode": "10001"}},
+    ...     {"id": 2, "name": "Bob", "address": {"city": "SF", "zipcode": "94105"}},
+    ... ]
+    >>> ps.json_normalize(data)
+       id   name address.city address.zipcode
+    0   1  Alice          NYC           10001
+    1   2    Bob           SF           94105
+    """
+    # Convert the input JSON data to a Pandas-on-Spark DataFrame.
+    psdf: DataFrame = ps.DataFrame(data)
+    internal = psdf._internal
+    sdf = internal.spark_frame
+
+    index_spark_column_names = internal.index_spark_column_names
+
+    def flatten_schema(schema: StructType, prefix: str = "") -> Tuple[List[str], List[str]]:
+        """
+        Recursively flattens a nested schema and returns a list of columns and aliases.
+        """
+        fields = []
+        aliases = []
+        for field in schema.fields:
+            field_name = field.name
+            if field_name not in index_spark_column_names + [NATURAL_ORDER_COLUMN_NAME]:
+                name = f"{prefix}.{field_name}" if prefix else field_name
+                alias = f"{prefix}{sep}{field_name}" if prefix else field_name
+                if isinstance(field.dataType, StructType):
+                    subfields, subaliases = flatten_schema(field.dataType, prefix=name)
+                    fields += subfields
+                    aliases += subaliases
+                else:
+                    fields.append(name)
+                    aliases.append(alias)
+        return fields, aliases
+
+    fields, aliases = flatten_schema(sdf.schema)
+
+    # Create columns using fields and aliases
+    selected_columns = [F.col(field).alias(alias) for field, alias in zip(fields, aliases)]
+
+    # Update internal frame with new columns
+    internal = internal.with_new_columns(
+        selected_columns, column_labels=[(column_label,) for column_label in aliases]
+    )
+
+    # Convert back to Pandas-on-Spark DataFrame
+    return ps.DataFrame(internal)
+
+
 def _get_index_map(
     sdf: PySparkDataFrame, index_col: Optional[Union[str, List[str]]] = None
 ) -> Tuple[Optional[List[PySparkColumn]], Optional[List[Label]]]:
@@ -3771,11 +3873,19 @@ def _test() -> None:
     import uuid
     from pyspark.sql import SparkSession
     import pyspark.pandas.namespace
+    from pandas.util.version import Version
 
     os.chdir(os.environ["SPARK_HOME"])
 
+    if Version(np.__version__) >= Version("2"):
+        # Numpy 2.0+ changed its string format,
+        # adding type information to numeric scalars.
+        # `legacy="1.25"` only available in `nump>=2`
+        np.set_printoptions(legacy="1.25")  # type: ignore[arg-type]
+
     globs = pyspark.pandas.namespace.__dict__.copy()
     globs["ps"] = pyspark.pandas
+    globs["sf"] = F
     spark = (
         SparkSession.builder.master("local[4]")
         .appName("pyspark.pandas.namespace tests")

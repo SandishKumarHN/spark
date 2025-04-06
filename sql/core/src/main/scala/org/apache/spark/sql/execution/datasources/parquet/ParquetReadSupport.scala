@@ -21,7 +21,7 @@ import java.time.ZoneId
 import java.util
 import java.util.{Locale, Map => JMap, UUID}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.parquet.hadoop.api.{InitContext, ReadSupport}
@@ -35,8 +35,8 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.RebaseDateTime.RebaseSpec
 import org.apache.spark.sql.errors.QueryExecutionErrors
-import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.internal.SQLConf.LegacyBehaviorPolicy
+import org.apache.spark.sql.execution.datasources.VariantMetadata
+import org.apache.spark.sql.internal.{LegacyBehaviorPolicy, SQLConf}
 import org.apache.spark.sql.types._
 
 /**
@@ -130,8 +130,6 @@ object ParquetReadSupport extends Logging {
       SQLConf.NESTED_SCHEMA_PRUNING_ENABLED.defaultValue.get)
     val useFieldId = conf.getBoolean(SQLConf.PARQUET_FIELD_ID_READ_ENABLED.key,
       SQLConf.PARQUET_FIELD_ID_READ_ENABLED.defaultValue.get)
-    val inferTimestampNTZ = conf.getBoolean(SQLConf.PARQUET_INFER_TIMESTAMP_NTZ_ENABLED.key,
-      SQLConf.PARQUET_INFER_TIMESTAMP_NTZ_ENABLED.defaultValue.get)
     val ignoreMissingIds = conf.getBoolean(SQLConf.IGNORE_MISSING_PARQUET_FIELD_ID.key,
       SQLConf.IGNORE_MISSING_PARQUET_FIELD_ID.defaultValue.get)
 
@@ -223,6 +221,9 @@ object ParquetReadSupport extends Logging {
         // Only clips map types with nested key type or value type
         clipParquetMapType(
           parquetType.asGroupType(), t.keyType, t.valueType, caseSensitive, useFieldId)
+
+      case t: StructType if VariantMetadata.isVariantStruct(t) =>
+        clipVariantSchema(parquetType.asGroupType(), t)
 
       case t: StructType =>
         clipParquetGroup(parquetType.asGroupType(), t, caseSensitive, useFieldId)
@@ -391,6 +392,11 @@ object ParquetReadSupport extends Logging {
       .as(parquetRecord.getLogicalTypeAnnotation)
       .addFields(clippedParquetFields: _*)
       .named(parquetRecord.getName)
+  }
+
+  private def clipVariantSchema(parquetType: GroupType, variantStruct: StructType): GroupType = {
+    // TODO(SHREDDING): clip `parquetType` to retain the necessary columns.
+    parquetType
   }
 
   /**

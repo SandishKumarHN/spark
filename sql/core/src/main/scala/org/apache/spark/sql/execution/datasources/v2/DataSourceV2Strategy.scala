@@ -20,10 +20,11 @@ package org.apache.spark.sql.execution.datasources.v2
 import scala.collection.mutable
 
 import org.apache.commons.lang3.StringUtils
+import org.apache.hadoop.fs.Path
 
 import org.apache.spark.SparkException
-import org.apache.spark.internal.Logging
-import org.apache.spark.sql.{SparkSession, Strategy}
+import org.apache.spark.internal.{Logging, MDC}
+import org.apache.spark.internal.LogKeys.EXPR
 import org.apache.spark.sql.catalyst.analysis.{ResolvedIdentifier, ResolvedNamespace, ResolvedPartitionSpec, ResolvedTable}
 import org.apache.spark.sql.catalyst.catalog.CatalogUtils
 import org.apache.spark.sql.catalyst.expressions
@@ -31,9 +32,9 @@ import org.apache.spark.sql.catalyst.expressions.{And, Attribute, DynamicPruning
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.planning.PhysicalOperation
 import org.apache.spark.sql.catalyst.plans.logical._
-import org.apache.spark.sql.catalyst.util.{toPrettySQL, GeneratedColumn, ResolveDefaultColumns, V2ExpressionBuilder}
+import org.apache.spark.sql.catalyst.util.{toPrettySQL, GeneratedColumn, IdentityColumn, ResolveDefaultColumns, V2ExpressionBuilder}
+import org.apache.spark.sql.classic.SparkSession
 import org.apache.spark.sql.connector.catalog.{Identifier, StagingTableCatalog, SupportsDeleteV2, SupportsNamespaces, SupportsPartitionManagement, SupportsWrite, Table, TableCapability, TableCatalog, TruncatableTable}
-import org.apache.spark.sql.connector.catalog.CatalogV2Util.structTypeToV2Columns
 import org.apache.spark.sql.connector.catalog.index.SupportsIndex
 import org.apache.spark.sql.connector.expressions.{FieldReference, LiteralValue}
 import org.apache.spark.sql.connector.expressions.filter.{And => V2And, Not => V2Not, Or => V2Or, Predicate}
@@ -41,33 +42,22 @@ import org.apache.spark.sql.connector.read.LocalScan
 import org.apache.spark.sql.connector.read.streaming.{ContinuousStream, MicroBatchStream}
 import org.apache.spark.sql.connector.write.V1Write
 import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryExecutionErrors}
-import org.apache.spark.sql.execution.{FilterExec, InSubqueryExec, LeafExecNode, LocalTableScanExec, ProjectExec, RowDataSourceScanExec, SparkPlan}
-import org.apache.spark.sql.execution.datasources.{DataSourceStrategy, LogicalRelation, PushableColumnAndNestedColumn}
+import org.apache.spark.sql.execution.{FilterExec, InSubqueryExec, LeafExecNode, LocalTableScanExec, ProjectExec, RowDataSourceScanExec, SparkPlan, SparkStrategy => Strategy}
+import org.apache.spark.sql.execution.command.CommandUtils
+import org.apache.spark.sql.execution.datasources.{DataSourceStrategy, LogicalRelationWithTable, PushableColumnAndNestedColumn}
 import org.apache.spark.sql.execution.streaming.continuous.{WriteToContinuousDataSource, WriteToContinuousDataSourceExec}
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.internal.StaticSQLConf.WAREHOUSE_PATH
 import org.apache.spark.sql.sources.{BaseRelation, TableScan}
-import org.apache.spark.sql.types.StructType
 import org.apache.spark.storage.StorageLevel
+import org.apache.spark.util.ArrayImplicits._
 
 class DataSourceV2Strategy(session: SparkSession) extends Strategy with PredicateHelper {
 
   import DataSourceV2Implicits._
   import org.apache.spark.sql.connector.catalog.CatalogV2Implicits._
 
-  private def withProjectAndFilter(
-      project: Seq[NamedExpression],
-      filters: Seq[Expression],
-      scan: LeafExecNode,
-      needsUnsafeConversion: Boolean): SparkPlan = {
-    val filterCondition = filters.reduceLeftOption(And)
-    val withFilter = filterCondition.map(FilterExec(_, scan)).getOrElse(scan)
-
-    if (withFilter.output != project || needsUnsafeConversion) {
-      ProjectExec(project, withFilter)
-    } else {
-      withFilter
-    }
-  }
+  private def hadoopConf = session.sessionState.newHadoopConf()
 
   private def refreshCache(r: DataSourceV2Relation)(): Unit = {
     session.sharedState.cacheManager.recacheByPlan(session, r)
@@ -82,7 +72,7 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
   // given table, the cache's storage level is returned.
   private def invalidateTableCache(r: ResolvedTable)(): Option[StorageLevel] = {
     val v2Relation = DataSourceV2Relation.create(r.table, Some(r.catalog), Some(r.identifier))
-    val cache = session.sharedState.cacheManager.lookupCachedData(v2Relation)
+    val cache = session.sharedState.cacheManager.lookupCachedData(session, v2Relation)
     session.sharedState.cacheManager.uncacheQuery(session, v2Relation, cascade = true)
     if (cache.isDefined) {
       val cacheLevel = cache.get.cachedRepresentation.cacheBuilder.storageLevel
@@ -103,13 +93,24 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
   }
 
   private def qualifyLocInTableSpec(tableSpec: TableSpec): TableSpec = {
-    tableSpec.copy(
-      location = tableSpec.location.map(makeQualifiedDBObjectPath(_)))
+    val newLoc = tableSpec.location.map { loc =>
+      val locationUri = CatalogUtils.stringToURI(loc)
+      val qualified = if (locationUri.isAbsolute) {
+        locationUri
+      } else if (new Path(locationUri).isAbsolute) {
+        CatalogUtils.makeQualifiedPath(locationUri, hadoopConf)
+      } else {
+        // Leave it to the catalog implementation to qualify relative paths.
+        locationUri
+      }
+      CatalogUtils.URIToString(qualified)
+    }
+    tableSpec.withNewLocation(newLoc)
   }
 
   override def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
     case PhysicalOperation(project, filters, DataSourceV2ScanRelation(
-      _, V1ScanWrapper(scan, pushed, pushedDownOperators), output, _, _)) =>
+      v2Relation, V1ScanWrapper(scan, pushed, pushedDownOperators), output, _, _)) =>
       val v1Relation = scan.toV1TableScan[BaseRelation with TableScan](session.sqlContext)
       if (v1Relation.schema != scan.readSchema()) {
         throw QueryExecutionErrors.fallbackV1RelationReportsInconsistentSchemaError(
@@ -117,6 +118,9 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
       }
       val rdd = v1Relation.buildScan()
       val unsafeRowRDD = DataSourceStrategy.toCatalystRDD(v1Relation, output, rdd)
+
+      val catalogName = v2Relation.catalog.map(_.name())
+      val tableIdentifier = v2Relation.identifier.flatMap(_.asTableIdentifierOpt(catalogName))
 
       val dsScan = RowDataSourceScanExec(
         output,
@@ -126,13 +130,16 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
         pushedDownOperators,
         unsafeRowRDD,
         v1Relation,
-        tableIdentifier = None)
-      withProjectAndFilter(project, filters, dsScan, needsUnsafeConversion = false) :: Nil
+        None,
+        tableIdentifier)
+      DataSourceV2Strategy.withProjectAndFilter(
+        project, filters, dsScan, needsUnsafeConversion = false) :: Nil
 
     case PhysicalOperation(project, filters,
         DataSourceV2ScanRelation(_, scan: LocalScan, output, _, _)) =>
-      val localScanExec = LocalTableScanExec(output, scan.rows().toSeq)
-      withProjectAndFilter(project, filters, localScanExec, needsUnsafeConversion = false) :: Nil
+      val localScanExec = LocalTableScanExec(output, scan.rows().toImmutableArraySeq, None)
+      DataSourceV2Strategy.withProjectAndFilter(
+        project, filters, localScanExec, needsUnsafeConversion = false) :: Nil
 
     case PhysicalOperation(project, filters, relation: DataSourceV2ScanRelation) =>
       // projection and filters were already pushed down in the optimizer.
@@ -143,10 +150,12 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
         case _ => false
       }
       val batchExec = BatchScanExec(relation.output, relation.scan, runtimeFilters,
-        relation.keyGroupedPartitioning, relation.ordering, relation.relation.table)
-      withProjectAndFilter(project, postScanFilters, batchExec, !batchExec.supportsColumnar) :: Nil
+        relation.ordering, relation.relation.table,
+        StoragePartitionJoinParams(relation.keyGroupedPartitioning))
+      DataSourceV2Strategy.withProjectAndFilter(
+        project, postScanFilters, batchExec, !batchExec.supportsColumnar) :: Nil
 
-    case PhysicalOperation(p, f, r: StreamingDataSourceV2Relation)
+    case PhysicalOperation(p, f, r: StreamingDataSourceV2ScanRelation)
       if r.startOffset.isDefined && r.endOffset.isDefined =>
 
       val microBatchStream = r.stream.asInstanceOf[MicroBatchStream]
@@ -154,16 +163,18 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
         r.output, r.scan, microBatchStream, r.startOffset.get, r.endOffset.get)
 
       // Add a Project here to make sure we produce unsafe rows.
-      withProjectAndFilter(p, f, scanExec, !scanExec.supportsColumnar) :: Nil
+      DataSourceV2Strategy.withProjectAndFilter(p, f, scanExec, !scanExec.supportsColumnar) :: Nil
 
-    case PhysicalOperation(p, f, r: StreamingDataSourceV2Relation)
+    case PhysicalOperation(p, f, r: StreamingDataSourceV2ScanRelation)
       if r.startOffset.isDefined && r.endOffset.isEmpty =>
 
       val continuousStream = r.stream.asInstanceOf[ContinuousStream]
       val scanExec = ContinuousScanExec(r.output, r.scan, continuousStream, r.startOffset.get)
+      // initialize partitions
+      scanExec.inputPartitions
 
       // Add a Project here to make sure we produce unsafe rows.
-      withProjectAndFilter(p, f, scanExec, !scanExec.supportsColumnar) :: Nil
+      DataSourceV2Strategy.withProjectAndFilter(p, f, scanExec, !scanExec.supportsColumnar) :: Nil
 
     case WriteToDataSourceV2(relationOpt, writer, query, customMetrics) =>
       val invalidateCacheFunc: () => Unit = () => relationOpt match {
@@ -172,19 +183,23 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
       }
       WriteToDataSourceV2Exec(writer, invalidateCacheFunc, planLater(query), customMetrics) :: Nil
 
-    case CreateTable(ResolvedIdentifier(catalog, ident), schema, partitioning,
-        tableSpec, ifNotExists) =>
-      ResolveDefaultColumns.validateCatalogForDefaultValue(schema, catalog.asTableCatalog, ident)
-      val newSchema: StructType =
-        ResolveDefaultColumns.constantFoldCurrentDefaultsToExistDefaults(
-          schema, "CREATE TABLE")
+    case c @ CreateTable(ResolvedIdentifier(catalog, ident), columns, partitioning,
+        tableSpec: TableSpec, ifNotExists) =>
+      ResolveDefaultColumns.validateCatalogForDefaultValue(columns, catalog.asTableCatalog, ident)
+      val statementType = "CREATE TABLE"
       GeneratedColumn.validateGeneratedColumns(
-        newSchema, catalog.asTableCatalog, ident, "CREATE TABLE")
+        c.tableSchema, catalog.asTableCatalog, ident, statementType)
+      IdentityColumn.validateIdentityColumn(c.tableSchema, catalog.asTableCatalog, ident)
 
-      CreateTableExec(catalog.asTableCatalog, ident, structTypeToV2Columns(newSchema),
-        partitioning, qualifyLocInTableSpec(tableSpec), ifNotExists) :: Nil
+      CreateTableExec(
+        catalog.asTableCatalog,
+        ident,
+        columns.map(_.toV2Column(statementType)).toArray,
+        partitioning,
+        qualifyLocInTableSpec(tableSpec),
+        ifNotExists) :: Nil
 
-    case CreateTableAsSelect(ResolvedIdentifier(catalog, ident), parts, query, tableSpec,
+    case CreateTableAsSelect(ResolvedIdentifier(catalog, ident), parts, query, tableSpec: TableSpec,
         options, ifNotExists, true) =>
       catalog match {
         case staging: StagingTableCatalog =>
@@ -198,15 +213,15 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
     case RefreshTable(r: ResolvedTable) =>
       RefreshTableExec(r.catalog, r.identifier, recacheTable(r)) :: Nil
 
-    case ReplaceTable(ResolvedIdentifier(catalog, ident), schema, parts, tableSpec, orCreate) =>
-      ResolveDefaultColumns.validateCatalogForDefaultValue(schema, catalog.asTableCatalog, ident)
-      val newSchema: StructType =
-        ResolveDefaultColumns.constantFoldCurrentDefaultsToExistDefaults(
-          schema, "CREATE TABLE")
+    case c @ ReplaceTable(
+        ResolvedIdentifier(catalog, ident), columns, parts, tableSpec: TableSpec, orCreate) =>
+      ResolveDefaultColumns.validateCatalogForDefaultValue(columns, catalog.asTableCatalog, ident)
+      val statementType = "REPLACE TABLE"
       GeneratedColumn.validateGeneratedColumns(
-        newSchema, catalog.asTableCatalog, ident, "CREATE TABLE")
+        c.tableSchema, catalog.asTableCatalog, ident, statementType)
+      IdentityColumn.validateIdentityColumn(c.tableSchema, catalog.asTableCatalog, ident)
 
-      val v2Columns = structTypeToV2Columns(newSchema)
+      val v2Columns = columns.map(_.toV2Column(statementType)).toArray
       catalog match {
         case staging: StagingTableCatalog =>
           AtomicReplaceTableExec(staging, ident, v2Columns, parts,
@@ -217,7 +232,7 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
       }
 
     case ReplaceTableAsSelect(ResolvedIdentifier(catalog, ident),
-        parts, query, tableSpec, options, orCreate, true) =>
+        parts, query, tableSpec: TableSpec, options, orCreate, true) =>
       catalog match {
         case staging: StagingTableCatalog =>
           AtomicReplaceTableAsSelectExec(
@@ -301,8 +316,8 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
             case _ =>
               throw QueryCompilationErrors.tableDoesNotSupportDeletesError(table)
           }
-        case LogicalRelation(_, _, catalogTable, _) =>
-          val tableIdentifier = catalogTable.get.identifier
+        case LogicalRelationWithTable(_, Some(catalogTable)) =>
+          val tableIdentifier = catalogTable.identifier
           throw QueryCompilationErrors.unsupportedTableOperationError(
             tableIdentifier,
             "DELETE")
@@ -310,19 +325,26 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
           throw SparkException.internalError("Unexpected table relation: " + other)
       }
 
-    case ReplaceData(_: DataSourceV2Relation, _, query, r: DataSourceV2Relation, Some(write)) =>
+    case ReplaceData(_: DataSourceV2Relation, _, query, r: DataSourceV2Relation, projections, _,
+        Some(write)) =>
       // use the original relation to refresh the cache
-      ReplaceDataExec(planLater(query), refreshCache(r), write) :: Nil
+      ReplaceDataExec(planLater(query), refreshCache(r), projections, write) :: Nil
 
     case WriteDelta(_: DataSourceV2Relation, _, query, r: DataSourceV2Relation, projections,
         Some(write)) =>
       // use the original relation to refresh the cache
       WriteDeltaExec(planLater(query), refreshCache(r), projections, write) :: Nil
 
+    case MergeRows(isSourceRowPresent, isTargetRowPresent, matchedInstructions,
+        notMatchedInstructions, notMatchedBySourceInstructions, checkCardinality, output, child) =>
+      MergeRowsExec(isSourceRowPresent, isTargetRowPresent, matchedInstructions,
+        notMatchedInstructions, notMatchedBySourceInstructions, checkCardinality,
+        output, planLater(child)) :: Nil
+
     case WriteToContinuousDataSource(writer, query, customMetrics) =>
       WriteToContinuousDataSourceExec(writer, planLater(query), customMetrics) :: Nil
 
-    case DescribeNamespace(ResolvedNamespace(catalog, ns), extended, output) =>
+    case DescribeNamespace(ResolvedNamespace(catalog, ns, _), extended, output) =>
       DescribeNamespaceExec(output, catalog.asNamespaceCatalog, ns, extended) :: Nil
 
     case DescribeRelation(r: ResolvedTable, partitionSpec, isExtended, output) =>
@@ -341,13 +363,11 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
       }
 
     case DropTable(r: ResolvedIdentifier, ifExists, purge) =>
-      val invalidateFunc = () => session.sharedState.cacheManager.uncacheTableOrView(
-        session, r.catalog.name() +: r.identifier.namespace() :+ r.identifier.name(),
-        cascade = true)
+      val invalidateFunc = () => CommandUtils.uncacheTableOrView(session, r)
       DropTableExec(r.catalog.asTableCatalog, r.identifier, ifExists, purge, invalidateFunc) :: Nil
 
     case _: NoopCommand =>
-      LocalTableScanExec(Nil, Nil) :: Nil
+      LocalTableScanExec(Nil, Nil, None) :: Nil
 
     case RenameTable(r @ ResolvedTable(catalog, oldIdent, _, _), newIdent, isView) =>
       if (isView) {
@@ -360,10 +380,10 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
         invalidateTableCache(r),
         session.sharedState.cacheManager.cacheQuery) :: Nil
 
-    case SetNamespaceProperties(ResolvedNamespace(catalog, ns), properties) =>
+    case SetNamespaceProperties(ResolvedNamespace(catalog, ns, _), properties) =>
       AlterNamespaceSetPropertiesExec(catalog.asNamespaceCatalog, ns, properties) :: Nil
 
-    case SetNamespaceLocation(ResolvedNamespace(catalog, ns), location) =>
+    case SetNamespaceLocation(ResolvedNamespace(catalog, ns, _), location) =>
       if (StringUtils.isEmpty(location)) {
         throw QueryExecutionErrors.invalidEmptyLocationError(location)
       }
@@ -372,13 +392,13 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
         ns,
         Map(SupportsNamespaces.PROP_LOCATION -> makeQualifiedDBObjectPath(location))) :: Nil
 
-    case CommentOnNamespace(ResolvedNamespace(catalog, ns), comment) =>
+    case CommentOnNamespace(ResolvedNamespace(catalog, ns, _), comment) =>
       AlterNamespaceSetPropertiesExec(
         catalog.asNamespaceCatalog,
         ns,
         Map(SupportsNamespaces.PROP_COMMENT -> comment)) :: Nil
 
-    case CreateNamespace(ResolvedNamespace(catalog, ns), ifNotExists, properties) =>
+    case CreateNamespace(ResolvedNamespace(catalog, ns, _), ifNotExists, properties) =>
       val location = properties.get(SupportsNamespaces.PROP_LOCATION)
       if (location.isDefined && location.get.isEmpty) {
         throw QueryExecutionErrors.invalidEmptyLocationError(location.get)
@@ -388,16 +408,23 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
       }.getOrElse(properties)
       CreateNamespaceExec(catalog.asNamespaceCatalog, ns, ifNotExists, finalProperties) :: Nil
 
-    case DropNamespace(ResolvedNamespace(catalog, ns), ifExists, cascade) =>
+    case DropNamespace(ResolvedNamespace(catalog, ns, _), ifExists, cascade) =>
       DropNamespaceExec(catalog, ns, ifExists, cascade) :: Nil
 
-    case ShowNamespaces(ResolvedNamespace(catalog, ns), pattern, output) =>
-      ShowNamespacesExec(output, catalog.asNamespaceCatalog, ns, pattern) :: Nil
-
-    case ShowTables(ResolvedNamespace(catalog, ns), pattern, output) =>
+    case ShowTables(ResolvedNamespace(catalog, ns, _), pattern, output) =>
       ShowTablesExec(output, catalog.asTableCatalog, ns, pattern) :: Nil
 
-    case SetCatalogAndNamespace(ResolvedNamespace(catalog, ns)) =>
+    case ShowTablesExtended(
+        ResolvedNamespace(catalog, ns, _),
+        pattern,
+        output) =>
+      ShowTablesExtendedExec(output, catalog.asTableCatalog, ns, pattern) :: Nil
+
+    case ShowTablePartition(r: ResolvedTable, part, output) =>
+      ShowTablePartitionExec(output, r.catalog, r.identifier,
+        r.table.asPartitionable, Seq(part).asResolvedPartitionSpecs.head) :: Nil
+
+    case SetCatalogAndNamespace(ResolvedNamespace(catalog, ns, _)) =>
       val catalogManager = session.sessionState.catalogManager
       val namespace = if (ns.nonEmpty) Some(ns) else None
       SetCatalogAndNamespaceExec(catalogManager, Some(catalog.name()), namespace) :: Nil
@@ -449,7 +476,7 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
       if (asSerde) {
         throw QueryCompilationErrors.showCreateTableAsSerdeNotSupportedForV2TablesError()
       }
-      ShowCreateTableExec(output, rt.table) :: Nil
+      ShowCreateTableExec(output, rt) :: Nil
 
     case TruncateTable(r: ResolvedTable) =>
       TruncateTableExec(
@@ -462,8 +489,18 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
         Seq(part).asResolvedPartitionSpecs.head,
         recacheTable(r)) :: Nil
 
-    case ShowColumns(_: ResolvedTable, _, _) =>
-      throw QueryCompilationErrors.showColumnsNotSupportedForV2TablesError()
+    case ShowColumns(resolvedTable: ResolvedTable, ns, output) =>
+      ns match {
+        case Some(namespace) =>
+          val tableNamespace = resolvedTable.identifier.namespace()
+          if (namespace.length != tableNamespace.length ||
+            !namespace.zip(tableNamespace).forall(SQLConf.get.resolver.tupled)) {
+            throw QueryCompilationErrors.showColumnsWithConflictNamespacesError(
+              namespace, tableNamespace.toSeq)
+          }
+        case _ =>
+      }
+      ShowColumnsExec(output, resolvedTable) :: Nil
 
     case r @ ShowPartitions(
         ResolvedTable(catalog, _, table: SupportsPartitionManagement, _),
@@ -515,7 +552,8 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
           s"DropIndex is not supported in this table ${table.name}.")
       }
 
-    case ShowFunctions(ResolvedNamespace(catalog, ns), userScope, systemScope, pattern, output) =>
+    case ShowFunctions(
+      ResolvedNamespace(catalog, ns, _), userScope, systemScope, pattern, output) =>
       ShowFunctionsExec(
         output,
         catalog.asFunctionCatalog,
@@ -523,6 +561,9 @@ class DataSourceV2Strategy(session: SparkSession) extends Strategy with Predicat
         userScope,
         systemScope,
         pattern) :: Nil
+
+    case c: Call =>
+      ExplainOnlySparkPlan(c) :: Nil
 
     case _ => Nil
   }
@@ -609,7 +650,8 @@ private[sql] object DataSourceV2Strategy extends Logging {
         expressions.Not(rebuildExpressionFromFilter(not.child(), translatedFilterToExpr))
       case _ =>
         translatedFilterToExpr.getOrElse(predicate,
-          throw new IllegalStateException("Failed to rebuild Expression for filter: " + predicate))
+          throw SparkException.internalError(
+            "Failed to rebuild Expression for filter: " + predicate))
     }
   }
 
@@ -622,24 +664,44 @@ private[sql] object DataSourceV2Strategy extends Logging {
   protected[sql] def translateRuntimeFilterV2(expr: Expression): Option[Predicate] = expr match {
     case in @ InSubqueryExec(PushableColumnAndNestedColumn(name), _, _, _, _, _) =>
       val values = in.values().getOrElse {
-        throw new IllegalStateException(s"Can't translate $in to v2 Predicate, no subquery result")
+        throw SparkException.internalError(
+          s"Can't translate $in to v2 Predicate, no subquery result")
       }
       val literals = values.map(LiteralValue(_, in.child.dataType))
       Some(new Predicate("IN", FieldReference(name) +: literals))
 
     case other =>
-      logWarning(s"Can't translate $other to source filter, unsupported expression")
+      logWarning(log"Can't translate ${MDC(EXPR, other)} to source filter, unsupported expression")
       None
+  }
+
+  /**
+   * Creates new spark plan that should apply given filters and projections to given scan node
+   * @param project Projection list that should be output of returned spark plan
+   * @param filters Filter list that should be applied to scan node
+   * @param scan Scan node
+   * @param needsUnsafeConversion Value that indicates whether unsafe conversion is needed
+   * @return SparkPlan tree composed of scan node and eventually filter/project nodes
+   */
+  protected[sql] def withProjectAndFilter(
+      project: Seq[NamedExpression],
+      filters: Seq[Expression],
+      scan: LeafExecNode,
+      needsUnsafeConversion: Boolean): SparkPlan = {
+    val filterCondition = filters.reduceLeftOption(And)
+    val withFilter = filterCondition.map(FilterExec(_, scan)).getOrElse(scan)
+
+    if (withFilter.output != project || needsUnsafeConversion) {
+      ProjectExec(project, withFilter)
+    } else {
+      withFilter
+    }
   }
 }
 
 /**
  * Get the expression of DS V2 to represent catalyst predicate that can be pushed down.
  */
-object PushablePredicate {
-  def unapply(e: Expression): Option[Predicate] =
-    new V2ExpressionBuilder(e, true).build().map { v =>
-      assert(v.isInstanceOf[Predicate])
-      v.asInstanceOf[Predicate]
-    }
+object PushablePredicate extends Logging {
+  def unapply(e: Expression): Option[Predicate] = new V2ExpressionBuilder(e, true).buildPredicate()
 }

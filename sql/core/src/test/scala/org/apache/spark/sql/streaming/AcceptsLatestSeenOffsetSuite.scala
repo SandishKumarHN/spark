@@ -19,14 +19,17 @@ package org.apache.spark.sql.streaming
 
 import org.scalatest.BeforeAndAfter
 
-import org.apache.spark.sql._
+import org.apache.spark.sql.{Encoder, SQLContext}
 import org.apache.spark.sql.catalyst.plans.logical.Range
+import org.apache.spark.sql.classic.{DataFrame, Dataset, SparkSession}
 import org.apache.spark.sql.connector.read.streaming
 import org.apache.spark.sql.connector.read.streaming.{AcceptsLatestSeenOffset, SparkDataStream}
 import org.apache.spark.sql.execution.streaming._
 import org.apache.spark.sql.execution.streaming.sources.{ContinuousMemoryStream, ContinuousMemoryStreamOffset}
 import org.apache.spark.sql.types.{LongType, StructType}
+import org.apache.spark.tags.SlowSQLTest
 
+@SlowSQLTest
 class AcceptsLatestSeenOffsetSuite extends StreamTest with BeforeAndAfter {
 
   import testImplicits._

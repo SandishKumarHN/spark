@@ -37,10 +37,13 @@ trait AlterTableRenameSuiteBase extends command.AlterTableRenameSuiteBase with Q
         sql(s"CREATE NAMESPACE $catalog.src_ns")
         val src = dst.replace("dst", "src")
         sql(s"CREATE TABLE $src (c0 INT) $defaultUsing")
-        val errMsg = intercept[AnalysisException] {
-          sql(s"ALTER TABLE $src RENAME TO dst_ns.dst_tbl")
-        }.getMessage
-        assert(errMsg.contains("source and destination databases do not match"))
+        checkError(
+          exception = intercept[AnalysisException] {
+            sql(s"ALTER TABLE $src RENAME TO dst_ns.dst_tbl")
+          },
+          condition = "_LEGACY_ERROR_TEMP_1073",
+          parameters = Map("db" -> "src_ns", "newDb" -> "dst_ns")
+        )
       }
     }
   }
@@ -72,7 +75,7 @@ trait AlterTableRenameSuiteBase extends command.AlterTableRenameSuiteBase with Q
           exception = intercept[SparkRuntimeException] {
             sql(s"ALTER TABLE $src RENAME TO ns.dst_tbl")
           },
-          errorClass = "LOCATION_ALREADY_EXISTS",
+          condition = "LOCATION_ALREADY_EXISTS",
           parameters = Map(
             "location" -> s"'$dst_dir'",
             "identifier" -> toSQLId(dst)))

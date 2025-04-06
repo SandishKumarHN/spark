@@ -205,7 +205,6 @@ private[deploy] object DeployMessages {
 
   case class RegisteredApplication(appId: String, master: RpcEndpointRef) extends DeployMessage
 
-  // TODO(matei): replace hostPort with host
   case class ExecutorAdded(id: Int, workerId: String, hostPort: String, cores: Int, memory: Int) {
     Utils.checkHostPort(hostPort)
   }
@@ -233,10 +232,20 @@ private[deploy] object DeployMessages {
       master: RpcEndpointRef, driverId: String, success: Boolean, message: String)
     extends DeployMessage
 
+  case object RequestKillAllDrivers extends DeployMessage
+
+  case class KillAllDriversResponse(
+      master: RpcEndpointRef, success: Boolean, message: String)
+    extends DeployMessage
+
   case class RequestDriverStatus(driverId: String) extends DeployMessage
 
   case class DriverStatusResponse(found: Boolean, state: Option[DriverState],
     workerId: Option[String], workerHostPort: Option[String], exception: Option[Exception])
+
+  case object RequestClearCompletedDriversAndApps extends DeployMessage
+
+  case object RequestReadyz extends DeployMessage
 
   // Internal message in AppClient
 

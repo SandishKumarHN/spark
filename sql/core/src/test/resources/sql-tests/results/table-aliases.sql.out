@@ -25,25 +25,17 @@ struct<col1:int,col2:int>
 
 
 -- !query
-SELECT col1 AS k, SUM(col2) FROM testData AS t(col1, col2) GROUP BY k
--- !query schema
-struct<k:int,sum(col2):bigint>
--- !query output
-1	3
-2	1
-
-
--- !query
 SELECT * FROM testData AS t(col1, col2, col3)
 -- !query schema
 struct<>
 -- !query output
 org.apache.spark.sql.AnalysisException
 {
-  "errorClass" : "_LEGACY_ERROR_TEMP_1028",
+  "errorClass" : "ASSIGNMENT_ARITY_MISMATCH",
+  "sqlState" : "42802",
   "messageParameters" : {
-    "columnSize" : "3",
-    "outputSize" : "2"
+    "numExpr" : "3",
+    "numTarget" : "2"
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -62,10 +54,11 @@ struct<>
 -- !query output
 org.apache.spark.sql.AnalysisException
 {
-  "errorClass" : "_LEGACY_ERROR_TEMP_1028",
+  "errorClass" : "ASSIGNMENT_ARITY_MISMATCH",
+  "sqlState" : "42802",
   "messageParameters" : {
-    "columnSize" : "1",
-    "outputSize" : "2"
+    "numExpr" : "1",
+    "numTarget" : "2"
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -82,13 +75,13 @@ SELECT a AS col1, b AS col2 FROM testData AS t(c, d)
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.AnalysisException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "UNRESOLVED_COLUMN.WITH_SUGGESTION",
   "sqlState" : "42703",
   "messageParameters" : {
     "objectName" : "`a`",
-    "proposal" : "`t`.`c`, `t`.`d`"
+    "proposal" : "`c`, `d`"
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -166,3 +159,49 @@ struct<a:int,b:string,c:int,d:decimal(2,1)>
 1	a	1	8.5
 2	b	2	1.0
 3	c	3	3.2
+
+
+-- !query
+SELECT src1.* FROM src1 a ORDER BY id LIMIT 1
+-- !query schema
+struct<>
+-- !query output
+org.apache.spark.sql.AnalysisException
+{
+  "errorClass" : "CANNOT_RESOLVE_STAR_EXPAND",
+  "sqlState" : "42704",
+  "messageParameters" : {
+    "columns" : "`id`, `v1`",
+    "targetString" : "`src1`"
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 13,
+    "fragment" : "src1.*"
+  } ]
+}
+
+
+-- !query
+SELECT src1.id FROM (SELECT * FROM src1 ORDER BY id LIMIT 1) a
+-- !query schema
+struct<>
+-- !query output
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
+{
+  "errorClass" : "UNRESOLVED_COLUMN.WITH_SUGGESTION",
+  "sqlState" : "42703",
+  "messageParameters" : {
+    "objectName" : "`src1`.`id`",
+    "proposal" : "`a`.`id`, `a`.`v1`"
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 8,
+    "stopIndex" : 14,
+    "fragment" : "src1.id"
+  } ]
+}

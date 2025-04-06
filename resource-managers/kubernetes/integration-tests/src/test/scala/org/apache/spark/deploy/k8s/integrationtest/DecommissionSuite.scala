@@ -19,7 +19,7 @@ package org.apache.spark.deploy.k8s.integrationtest
 import java.io.File
 import java.nio.charset.StandardCharsets
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import com.google.common.io.Files
 import io.fabric8.kubernetes.api.model.Pod
@@ -40,20 +40,18 @@ private[spark] trait DecommissionSuite { k8sSuite: KubernetesSuite =>
     val logConfFilePath = s"${sparkHomeDir.toFile}/conf/log4j2.properties"
 
     try {
-      Files.write(
+      Files.asCharSink(new File(logConfFilePath), StandardCharsets.UTF_8).write(
         """rootLogger.level = info
           |rootLogger.appenderRef.stdout.ref = console
           |appender.console.type = Console
           |appender.console.name = console
           |appender.console.target = SYSTEM_OUT
           |appender.console.layout.type = PatternLayout
-          |appender.console.layout.pattern = %d{yy/MM/dd HH:mm:ss} %p %c{1}: %m%n%ex
+          |appender.console.layout.pattern = %d{HH:mm:ss.SSS} %p %c: %maxLen{%m}{512}%n%ex{8}%n
           |
           |logger.spark.name = org.apache.spark
           |logger.spark.level = debug
-      """.stripMargin,
-        new File(logConfFilePath),
-        StandardCharsets.UTF_8)
+      """.stripMargin)
 
       f()
     } finally {
@@ -156,7 +154,10 @@ private[spark] trait DecommissionSuite { k8sSuite: KubernetesSuite =>
             PatienceConfiguration.Timeout(Span(120, Seconds)),
             PatienceConfiguration.Interval(Span(1, Seconds))) {
 
-            val currentPod = client.pods().withName(pod.getMetadata.getName).get
+            val currentPod = client.pods()
+              .inNamespace(kubernetesTestComponents.namespace)
+              .withName(pod.getMetadata.getName)
+              .get
             val labels = currentPod.getMetadata.getLabels.asScala
 
             labels should not be (null)
@@ -172,7 +173,7 @@ private[spark] trait DecommissionSuite { k8sSuite: KubernetesSuite =>
         expectedDriverLogOnCompletion = Seq(
           "Finished waiting, stopping Spark",
           "Decommission executors",
-          "Remove reason statistics: (gracefully decommissioned: 1, decommision unfinished: 0, " +
+          "Remove reason statistics: (gracefully decommissioned: 1, decommission unfinished: 0, " +
             "driver killed: 0, unexpectedly exited: 0)."),
         appArgs = Array.empty[String],
         driverPodChecker = doBasicDriverPyPodCheck,

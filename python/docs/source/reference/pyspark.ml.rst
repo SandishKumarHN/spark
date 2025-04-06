@@ -19,6 +19,9 @@
 MLlib (DataFrame-based)
 =======================
 
+.. note::
+   From Apache Spark 4.0.0, all builtin algorithms support Spark Connect.
+
 Pipeline APIs
 -------------
 
@@ -104,6 +107,8 @@ Feature
     StopWordsRemover
     StringIndexer
     StringIndexerModel
+    TargetEncoder
+    TargetEncoderModel
     Tokenizer
     UnivariateFeatureSelector
     UnivariateFeatureSelectorModel
@@ -351,6 +356,13 @@ Distributor
     :toctree: api/
 
     TorchDistributor
+
+.. currentmodule:: pyspark.ml.deepspeed.deepspeed_distributor
+.. autosummary::
+    :template: autosummary/class_with_docs.rst
+    :toctree: api/
+
+    DeepspeedTorchDistributor
 
 
 Utilities

@@ -16,10 +16,9 @@
 #
 
 import sys
-
 from typing import Any, Dict, Generic, List, Optional, TypeVar, TYPE_CHECKING
-
 from abc import ABCMeta
+from functools import cached_property
 
 from pyspark import keyword_only, since
 from pyspark.ml import Predictor, PredictionModel
@@ -46,6 +45,7 @@ from pyspark.ml.param.shared import (
     HasLoss,
     HasVarianceCol,
 )
+from pyspark.ml.util import try_remote_attribute_relation
 from pyspark.ml.tree import (
     _DecisionTreeModel,
     _DecisionTreeParams,
@@ -72,6 +72,7 @@ from pyspark.ml.wrapper import (
 )
 from pyspark.ml.common import inherit_doc
 from pyspark.sql import DataFrame
+from pyspark.sql.utils import is_remote
 
 if TYPE_CHECKING:
     from py4j.java_gateway import JavaObject
@@ -268,7 +269,7 @@ class LinearRegression(
     True
     >>> abs(model.transform(test0).head().newPrediction - (-1.0)) < 0.001
     True
-    >>> abs(model.coefficients[0] - 1.0) < 0.001
+    >>> bool(abs(model.coefficients[0] - 1.0) < 0.001)
     True
     >>> abs(model.intercept - 0.0) < 0.001
     True
@@ -285,11 +286,11 @@ class LinearRegression(
     >>> model_path = temp_path + "/lr_model"
     >>> model.save(model_path)
     >>> model2 = LinearRegressionModel.load(model_path)
-    >>> model.coefficients[0] == model2.coefficients[0]
+    >>> bool(model.coefficients[0] == model2.coefficients[0])
     True
-    >>> model.intercept == model2.intercept
+    >>> bool(model.intercept == model2.intercept)
     True
-    >>> model.transform(test0).take(1) == model2.transform(test0).take(1)
+    >>> bool(model.transform(test0).take(1) == model2.transform(test0).take(1))
     True
     >>> model.numFeatures
     1
@@ -453,7 +454,7 @@ class LinearRegressionModel(
     .. versionadded:: 1.4.0
     """
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def coefficients(self) -> Vector:
         """
@@ -461,7 +462,7 @@ class LinearRegressionModel(
         """
         return self._call_java("coefficients")
 
-    @property  # type: ignore[misc]
+    @property
     @since("1.4.0")
     def intercept(self) -> float:
         """
@@ -469,7 +470,7 @@ class LinearRegressionModel(
         """
         return self._call_java("intercept")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.3.0")
     def scale(self) -> float:
         r"""
@@ -477,7 +478,7 @@ class LinearRegressionModel(
         """
         return self._call_java("scale")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def summary(self) -> "LinearRegressionTrainingSummary":
         """
@@ -486,7 +487,10 @@ class LinearRegressionModel(
         `trainingSummary is None`.
         """
         if self.hasSummary:
-            return LinearRegressionTrainingSummary(super(LinearRegressionModel, self).summary)
+            s = LinearRegressionTrainingSummary(super(LinearRegressionModel, self).summary)
+            if is_remote():
+                s.__source_transformer__ = self  # type: ignore[attr-defined]
+            return s
         else:
             raise RuntimeError(
                 "No training summary available for this %s" % self.__class__.__name__
@@ -507,7 +511,10 @@ class LinearRegressionModel(
         if not isinstance(dataset, DataFrame):
             raise TypeError("dataset must be a DataFrame but got %s." % type(dataset))
         java_lr_summary = self._call_java("evaluate", dataset)
-        return LinearRegressionSummary(java_lr_summary)
+        s = LinearRegressionSummary(java_lr_summary)
+        if is_remote():
+            s.__source_transformer__ = self  # type: ignore[attr-defined]
+        return s
 
 
 class LinearRegressionSummary(JavaWrapper):
@@ -517,15 +524,16 @@ class LinearRegressionSummary(JavaWrapper):
     .. versionadded:: 2.0.0
     """
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
+    @try_remote_attribute_relation
     def predictions(self) -> DataFrame:
         """
         Dataframe outputted by the model's `transform` method.
         """
         return self._call_java("predictions")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def predictionCol(self) -> str:
         """
@@ -534,7 +542,7 @@ class LinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("predictionCol")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def labelCol(self) -> str:
         """
@@ -543,7 +551,7 @@ class LinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("labelCol")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def featuresCol(self) -> str:
         """
@@ -552,7 +560,7 @@ class LinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("featuresCol")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def explainedVariance(self) -> float:
         r"""
@@ -571,7 +579,7 @@ class LinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("explainedVariance")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def meanAbsoluteError(self) -> float:
         """
@@ -587,7 +595,7 @@ class LinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("meanAbsoluteError")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def meanSquaredError(self) -> float:
         """
@@ -603,7 +611,7 @@ class LinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("meanSquaredError")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def rootMeanSquaredError(self) -> float:
         """
@@ -618,7 +626,7 @@ class LinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("rootMeanSquaredError")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def r2(self) -> float:
         """
@@ -635,7 +643,7 @@ class LinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("r2")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.4.0")
     def r2adj(self) -> float:
         """
@@ -651,15 +659,16 @@ class LinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("r2adj")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
+    @try_remote_attribute_relation
     def residuals(self) -> DataFrame:
         """
         Residuals (label - predicted value)
         """
         return self._call_java("residuals")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def numInstances(self) -> int:
         """
@@ -667,7 +676,7 @@ class LinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("numInstances")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.2.0")
     def degreesOfFreedom(self) -> int:
         """
@@ -675,7 +684,7 @@ class LinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("degreesOfFreedom")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def devianceResiduals(self) -> List[float]:
         """
@@ -977,7 +986,7 @@ class IsotonicRegressionModel(
         """
         return self._set(featureIndex=value)
 
-    @property  # type: ignore[misc]
+    @property
     @since("1.6.0")
     def boundaries(self) -> Vector:
         """
@@ -985,7 +994,7 @@ class IsotonicRegressionModel(
         """
         return self._call_java("boundaries")
 
-    @property  # type: ignore[misc]
+    @property
     @since("1.6.0")
     def predictions(self) -> Vector:
         """
@@ -994,7 +1003,7 @@ class IsotonicRegressionModel(
         """
         return self._call_java("predictions")
 
-    @property  # type: ignore[misc]
+    @property
     @since("3.0.0")
     def numFeatures(self) -> int:
         """
@@ -1600,10 +1609,12 @@ class RandomForestRegressionModel(
     .. versionadded:: 1.4.0
     """
 
-    @property  # type: ignore[misc]
+    @cached_property
     @since("2.0.0")
     def trees(self) -> List[DecisionTreeRegressionModel]:
         """Trees in this ensemble. Warning: These have null parent Estimators."""
+        if is_remote():
+            return [DecisionTreeRegressionModel(m) for m in self._call_java("trees").split(",")]
         return [DecisionTreeRegressionModel(m) for m in list(self._call_java("trees"))]
 
     @property
@@ -1989,10 +2000,12 @@ class GBTRegressionModel(
         """
         return self._call_java("featureImportances")
 
-    @property  # type: ignore[misc]
+    @cached_property
     @since("2.0.0")
     def trees(self) -> List[DecisionTreeRegressionModel]:
         """Trees in this ensemble. Warning: These have null parent Estimators."""
+        if is_remote():
+            return [DecisionTreeRegressionModel(m) for m in self._call_java("trees").split(",")]
         return [DecisionTreeRegressionModel(m) for m in list(self._call_java("trees"))]
 
     def evaluateEachIteration(self, dataset: DataFrame, loss: str) -> List[float]:
@@ -2308,7 +2321,7 @@ class AFTSurvivalRegressionModel(
         """
         return self._set(quantilesCol=value)
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def coefficients(self) -> Vector:
         """
@@ -2316,7 +2329,7 @@ class AFTSurvivalRegressionModel(
         """
         return self._call_java("coefficients")
 
-    @property  # type: ignore[misc]
+    @property
     @since("1.6.0")
     def intercept(self) -> float:
         """
@@ -2324,7 +2337,7 @@ class AFTSurvivalRegressionModel(
         """
         return self._call_java("intercept")
 
-    @property  # type: ignore[misc]
+    @property
     @since("1.6.0")
     def scale(self) -> float:
         """
@@ -2544,7 +2557,7 @@ class GeneralizedLinearRegression(
     >>> model2 = GeneralizedLinearRegressionModel.load(model_path)
     >>> model.intercept == model2.intercept
     True
-    >>> model.coefficients[0] == model2.coefficients[0]
+    >>> bool(model.coefficients[0] == model2.coefficients[0])
     True
     >>> model.transform(df).take(1) == model2.transform(df).take(1)
     True
@@ -2734,7 +2747,7 @@ class GeneralizedLinearRegressionModel(
         """
         return self._set(linkPredictionCol=value)
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def coefficients(self) -> Vector:
         """
@@ -2742,7 +2755,7 @@ class GeneralizedLinearRegressionModel(
         """
         return self._call_java("coefficients")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def intercept(self) -> float:
         """
@@ -2750,7 +2763,7 @@ class GeneralizedLinearRegressionModel(
         """
         return self._call_java("intercept")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def summary(self) -> "GeneralizedLinearRegressionTrainingSummary":
         """
@@ -2759,9 +2772,12 @@ class GeneralizedLinearRegressionModel(
         `trainingSummary is None`.
         """
         if self.hasSummary:
-            return GeneralizedLinearRegressionTrainingSummary(
+            s = GeneralizedLinearRegressionTrainingSummary(
                 super(GeneralizedLinearRegressionModel, self).summary
             )
+            if is_remote():
+                s.__source_transformer__ = self  # type: ignore[attr-defined]
+            return s
         else:
             raise RuntimeError(
                 "No training summary available for this %s" % self.__class__.__name__
@@ -2782,7 +2798,10 @@ class GeneralizedLinearRegressionModel(
         if not isinstance(dataset, DataFrame):
             raise TypeError("dataset must be a DataFrame but got %s." % type(dataset))
         java_glr_summary = self._call_java("evaluate", dataset)
-        return GeneralizedLinearRegressionSummary(java_glr_summary)
+        s = GeneralizedLinearRegressionSummary(java_glr_summary)
+        if is_remote():
+            s.__source_transformer__ = self  # type: ignore[attr-defined]
+        return s
 
 
 class GeneralizedLinearRegressionSummary(JavaWrapper):
@@ -2792,15 +2811,16 @@ class GeneralizedLinearRegressionSummary(JavaWrapper):
     .. versionadded:: 2.0.0
     """
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
+    @try_remote_attribute_relation
     def predictions(self) -> DataFrame:
         """
         Predictions output by the model's `transform` method.
         """
         return self._call_java("predictions")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def predictionCol(self) -> str:
         """
@@ -2809,7 +2829,7 @@ class GeneralizedLinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("predictionCol")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.2.0")
     def numInstances(self) -> int:
         """
@@ -2817,7 +2837,7 @@ class GeneralizedLinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("numInstances")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def rank(self) -> int:
         """
@@ -2825,7 +2845,7 @@ class GeneralizedLinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("rank")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def degreesOfFreedom(self) -> int:
         """
@@ -2833,7 +2853,7 @@ class GeneralizedLinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("degreesOfFreedom")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def residualDegreeOfFreedom(self) -> int:
         """
@@ -2841,7 +2861,7 @@ class GeneralizedLinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("residualDegreeOfFreedom")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def residualDegreeOfFreedomNull(self) -> int:
         """
@@ -2849,6 +2869,7 @@ class GeneralizedLinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("residualDegreeOfFreedomNull")
 
+    @try_remote_attribute_relation
     def residuals(self, residualsType: str = "deviance") -> DataFrame:
         """
         Get the residuals of the fitted model by type.
@@ -2863,7 +2884,7 @@ class GeneralizedLinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("residuals", residualsType)
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def nullDeviance(self) -> float:
         """
@@ -2871,7 +2892,7 @@ class GeneralizedLinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("nullDeviance")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def deviance(self) -> float:
         """
@@ -2879,7 +2900,7 @@ class GeneralizedLinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("deviance")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def dispersion(self) -> float:
         """
@@ -2890,7 +2911,7 @@ class GeneralizedLinearRegressionSummary(JavaWrapper):
         """
         return self._call_java("dispersion")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def aic(self) -> float:
         """
@@ -2907,7 +2928,7 @@ class GeneralizedLinearRegressionTrainingSummary(GeneralizedLinearRegressionSumm
     .. versionadded:: 2.0.0
     """
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def numIterations(self) -> int:
         """
@@ -2915,7 +2936,7 @@ class GeneralizedLinearRegressionTrainingSummary(GeneralizedLinearRegressionSumm
         """
         return self._call_java("numIterations")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def solver(self) -> str:
         """
@@ -2923,7 +2944,7 @@ class GeneralizedLinearRegressionTrainingSummary(GeneralizedLinearRegressionSumm
         """
         return self._call_java("solver")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def coefficientStandardErrors(self) -> List[float]:
         """
@@ -2934,7 +2955,7 @@ class GeneralizedLinearRegressionTrainingSummary(GeneralizedLinearRegressionSumm
         """
         return self._call_java("coefficientStandardErrors")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def tValues(self) -> List[float]:
         """
@@ -2945,7 +2966,7 @@ class GeneralizedLinearRegressionTrainingSummary(GeneralizedLinearRegressionSumm
         """
         return self._call_java("tValues")
 
-    @property  # type: ignore[misc]
+    @property
     @since("2.0.0")
     def pValues(self) -> List[float]:
         """
@@ -3280,7 +3301,7 @@ class FMRegressionModel(
     .. versionadded:: 3.0.0
     """
 
-    @property  # type: ignore[misc]
+    @property
     @since("3.0.0")
     def intercept(self) -> float:
         """
@@ -3288,7 +3309,7 @@ class FMRegressionModel(
         """
         return self._call_java("intercept")
 
-    @property  # type: ignore[misc]
+    @property
     @since("3.0.0")
     def linear(self) -> Vector:
         """
@@ -3296,7 +3317,7 @@ class FMRegressionModel(
         """
         return self._call_java("linear")
 
-    @property  # type: ignore[misc]
+    @property
     @since("3.0.0")
     def factors(self) -> Matrix:
         """

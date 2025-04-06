@@ -89,10 +89,13 @@ trait AlterTableSetLocationSuiteBase extends command.AlterTableSetLocationSuiteB
         checkLocation(tableIdent, new URI("/path/to/part/ways2"), Some(partSpec))
       }
       withSQLConf(SQLConf.CASE_SENSITIVE.key -> "true") {
-        val e = intercept[AnalysisException] {
-          sql(s"ALTER TABLE $t PARTITION (A='1', B='2') SET LOCATION '/path/to/part/ways3'")
-        }.getMessage
-        assert(e.contains("not a valid partition column"))
+        checkError(
+          exception = intercept[AnalysisException] {
+            sql(s"ALTER TABLE $t PARTITION (A='1', B='2') SET LOCATION '/path/to/part/ways3'")
+          },
+          condition = "PARTITIONS_NOT_FOUND",
+          parameters = Map("partitionList" -> "`A`", "tableName" -> "`spark_catalog`.`ns`.`tbl`")
+        )
       }
 
       sessionCatalog.setCurrentDatabase("ns")
@@ -124,7 +127,7 @@ trait AlterTableSetLocationSuiteBase extends command.AlterTableSetLocationSuiteB
         exception = intercept[AnalysisException] {
           sql(s"ALTER TABLE $t PARTITION (b='2') SET LOCATION '/mister/spark'")
         },
-        errorClass = "_LEGACY_ERROR_TEMP_1232",
+        condition = "_LEGACY_ERROR_TEMP_1232",
         parameters = Map(
           "specKeys" -> "b",
           "partitionColumnNames" -> "a, b",

@@ -16,54 +16,58 @@
  */
 package org.apache.spark.sql.protobuf
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.util.control.NonFatal
 
 import com.google.protobuf.DynamicMessage
+import com.google.protobuf.TypeRegistry
 
-import org.apache.spark.sql.catalyst.expressions.{ExpectsInputTypes, Expression, SpecificInternalRow, UnaryExpression}
+import org.apache.spark.sql.catalyst.expressions.{ExpectsInputTypes, Expression, UnaryExpression}
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, CodeGenerator, ExprCode}
 import org.apache.spark.sql.catalyst.util.{FailFastMode, ParseMode, PermissiveMode}
 import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryExecutionErrors}
 import org.apache.spark.sql.protobuf.utils.{ProtobufOptions, ProtobufUtils, SchemaConverters}
-import org.apache.spark.sql.types.{AbstractDataType, BinaryType, DataType, StructType}
+import org.apache.spark.sql.types.{AbstractDataType, BinaryType, DataType}
 
-private[protobuf] case class ProtobufDataToCatalyst(
+private[sql] case class ProtobufDataToCatalyst(
     child: Expression,
     messageName: String,
-    descFilePath: Option[String] = None,
+    binaryFileDescriptorSet: Option[Array[Byte]] = None,
     options: Map[String, String] = Map.empty)
     extends UnaryExpression
     with ExpectsInputTypes {
 
   override def inputTypes: Seq[AbstractDataType] = Seq(BinaryType)
 
-  override lazy val dataType: DataType = {
-    val dt = SchemaConverters.toSqlType(messageDescriptor, protobufOptions).dataType
-    parseMode match {
-      // With PermissiveMode, the output Catalyst row might contain columns of null values for
-      // corrupt records, even if some of the columns are not nullable in the user-provided schema.
-      // Therefore we force the schema to be all nullable here.
-      case PermissiveMode => dt.asNullable
-      case _ => dt
-    }
-  }
+  override lazy val dataType: DataType =
+    SchemaConverters.toSqlType(messageDescriptor, protobufOptions).dataType
 
   override def nullable: Boolean = true
 
   private lazy val protobufOptions = ProtobufOptions(options)
 
   @transient private lazy val messageDescriptor =
-    ProtobufUtils.buildDescriptor(messageName, descFilePath)
-    // TODO: Avoid carrying the file name. Read the contents of descriptor file only once
-    //       at the start. Rest of the runs should reuse the buffer. Otherwise, it could
-    //       cause inconsistencies if the file contents are changed the user after a few days.
-    //       Same for the write side in [[CatalystDataToProtobuf]].
+    ProtobufUtils.buildDescriptor(messageName, binaryFileDescriptorSet)
 
   @transient private lazy val fieldsNumbers =
     messageDescriptor.getFields.asScala.map(f => f.getNumber).toSet
 
-  @transient private lazy val deserializer = new ProtobufDeserializer(messageDescriptor, dataType)
+  @transient private lazy val deserializer = {
+    val typeRegistry = binaryFileDescriptorSet match {
+      case Some(descBytes) if protobufOptions.convertAnyFieldsToJson =>
+        ProtobufUtils.buildTypeRegistry(descBytes) // This loads all the messages in the desc set.
+      case None if protobufOptions.convertAnyFieldsToJson =>
+        ProtobufUtils.buildTypeRegistry(messageDescriptor) // Loads only connected messages.
+      case _ => TypeRegistry.getEmptyTypeRegistry // Default. Json conversion is not enabled.
+    }
+    new ProtobufDeserializer(
+      messageDescriptor,
+      dataType,
+      typeRegistry = typeRegistry,
+      emitDefaultValues = protobufOptions.emitDefaultValues,
+      enumsAsInts = protobufOptions.enumsAsInts
+    )
+  }
 
   @transient private var result: DynamicMessage = _
 
@@ -75,22 +79,9 @@ private[protobuf] case class ProtobufDataToCatalyst(
     mode
   }
 
-  @transient private lazy val nullResultRow: Any = dataType match {
-    case st: StructType =>
-      val resultRow = new SpecificInternalRow(st.map(_.dataType))
-      for (i <- 0 until st.length) {
-        resultRow.setNullAt(i)
-      }
-      resultRow
-
-    case _ =>
-      null
-  }
-
   private def handleException(e: Throwable): Any = {
     parseMode match {
-      case PermissiveMode =>
-        nullResultRow
+      case PermissiveMode => null
       case FailFastMode =>
         throw QueryExecutionErrors.malformedProtobufMessageDetectedInMessageParsingError(e)
       case _ =>
@@ -151,4 +142,35 @@ private[protobuf] case class ProtobufDataToCatalyst(
 
   override protected def withNewChildInternal(newChild: Expression): ProtobufDataToCatalyst =
     copy(child = newChild)
+
+  override def equals(that: Any): Boolean = {
+    that match {
+      case that: ProtobufDataToCatalyst =>
+        this.child == that.child &&
+        this.messageName == that.messageName &&
+        (
+          (this.binaryFileDescriptorSet.isEmpty && that.binaryFileDescriptorSet.isEmpty) ||
+          (
+            this.binaryFileDescriptorSet.nonEmpty && that.binaryFileDescriptorSet.nonEmpty &&
+            this.binaryFileDescriptorSet.get.sameElements(that.binaryFileDescriptorSet.get)
+          )
+        ) &&
+        this.options == that.options
+      case _ => false
+    }
+  }
+
+  override def hashCode(): Int = {
+    val prime = 31
+    var result = 1
+    var i = 0
+    while (i < binaryFileDescriptorSet.map(_.length).getOrElse(0)) {
+      result = prime * result + binaryFileDescriptorSet.get.apply(i).hashCode
+      i += 1
+    }
+    result = prime * result + child.hashCode
+    result = prime * result + messageName.hashCode
+    result = prime * result + options.hashCode
+    result
+  }
 }

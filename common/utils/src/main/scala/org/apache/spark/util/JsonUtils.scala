@@ -24,18 +24,21 @@ import com.fasterxml.jackson.core.{JsonEncoding, JsonGenerator}
 import com.fasterxml.jackson.databind.{DeserializationFeature, ObjectMapper}
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 
+import org.apache.spark.util.SparkErrorUtils.tryWithResource
 
-private[spark] object JsonUtils {
+private[spark] trait JsonUtils {
 
-  private val mapper = new ObjectMapper().registerModule(DefaultScalaModule)
+  protected val mapper: ObjectMapper = new ObjectMapper().registerModule(DefaultScalaModule)
     .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
 
   def toJsonString(block: JsonGenerator => Unit): String = {
-    val baos = new ByteArrayOutputStream()
-    val generator = mapper.createGenerator(baos, JsonEncoding.UTF8)
-    block(generator)
-    generator.close()
-    baos.close()
-    new String(baos.toByteArray, StandardCharsets.UTF_8)
+    tryWithResource(new ByteArrayOutputStream()) { baos =>
+      tryWithResource(mapper.createGenerator(baos, JsonEncoding.UTF8)) { generator =>
+        block(generator)
+      }
+      new String(baos.toByteArray, StandardCharsets.UTF_8)
+    }
   }
 }
+
+private[spark] object JsonUtils extends JsonUtils

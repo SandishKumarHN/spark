@@ -17,11 +17,10 @@
 
 package org.apache.spark
 
-import scala.collection.JavaConverters._
-
-import com.fasterxml.jackson.core.util.MinimalPrettyPrinter
+import scala.jdk.CollectionConverters._
 
 import org.apache.spark.util.JsonUtils.toJsonString
+import org.apache.spark.util.SparkClassUtils
 
 private[spark] object ErrorMessageFormat extends Enumeration {
   val PRETTY, MINIMAL, STANDARD = Value
@@ -33,7 +32,10 @@ private[spark] object ErrorMessageFormat extends Enumeration {
  */
 private[spark] object SparkThrowableHelper {
   val errorReader = new ErrorClassesJsonReader(
-    Seq(getClass.getClassLoader.getResource("error/error-classes.json")))
+    // Note that though we call them "error classes" here, the proper name is "error conditions",
+    // hence why the name of the JSON file is different. We will address this inconsistency as part
+    // of this ticket: https://issues.apache.org/jira/browse/SPARK-47429
+    Seq(SparkClassUtils.getSparkClassLoader.getResource("error/error-conditions.json")))
 
   def getMessage(
       errorClass: String,
@@ -52,24 +54,34 @@ private[spark] object SparkThrowableHelper {
       messageParameters: Map[String, String],
       context: String): String = {
     val displayMessage = errorReader.getErrorMessage(errorClass, messageParameters)
+    val sqlState = getSqlState(errorClass)
+    val displaySqlState = if (sqlState == null) "" else s" SQLSTATE: $sqlState"
     val displayQueryContext = (if (context.isEmpty) "" else "\n") + context
-    val prefix = if (errorClass.startsWith("_LEGACY_ERROR_TEMP_")) "" else s"[$errorClass] "
-    s"$prefix$displayMessage$displayQueryContext"
+    val prefix = if (errorClass.startsWith("_LEGACY_ERROR_")) "" else s"[$errorClass] "
+    s"$prefix$displayMessage$displaySqlState$displayQueryContext"
   }
 
   def getSqlState(errorClass: String): String = {
     errorReader.getSqlState(errorClass)
   }
 
+  def isValidErrorClass(errorClass: String): Boolean = {
+    errorReader.isValidErrorClass(errorClass)
+  }
+
+  def getMessageParameters(errorClass: String): Seq[String] = {
+    errorReader.getMessageParameters(errorClass)
+  }
+
   def isInternalError(errorClass: String): Boolean = {
-    errorClass.startsWith("INTERNAL_ERROR")
+    errorClass != null && errorClass.startsWith("INTERNAL_ERROR")
   }
 
   def getMessage(e: SparkThrowable with Throwable, format: ErrorMessageFormat.Value): String = {
     import ErrorMessageFormat._
     format match {
       case PRETTY => e.getMessage
-      case MINIMAL | STANDARD if e.getErrorClass == null =>
+      case MINIMAL | STANDARD if e.getCondition == null =>
         toJsonString { generator =>
           val g = generator.useDefaultPrettyPrinter()
           g.writeStartObject()
@@ -80,7 +92,7 @@ private[spark] object SparkThrowableHelper {
           g.writeEndObject()
         }
       case MINIMAL | STANDARD =>
-        val errorClass = e.getErrorClass
+        val errorClass = e.getCondition
         toJsonString { generator =>
           val g = generator.useDefaultPrettyPrinter()
           g.writeStartObject()
@@ -105,31 +117,25 @@ private[spark] object SparkThrowableHelper {
             g.writeArrayFieldStart("queryContext")
             e.getQueryContext.foreach { c =>
               g.writeStartObject()
-              g.writeStringField("objectType", c.objectType())
-              g.writeStringField("objectName", c.objectName())
-              val startIndex = c.startIndex() + 1
-              if (startIndex > 0) g.writeNumberField("startIndex", startIndex)
-              val stopIndex = c.stopIndex() + 1
-              if (stopIndex > 0) g.writeNumberField("stopIndex", stopIndex)
-              g.writeStringField("fragment", c.fragment())
+              c.contextType() match {
+                case QueryContextType.SQL =>
+                  g.writeStringField("objectType", c.objectType())
+                  g.writeStringField("objectName", c.objectName())
+                  val startIndex = c.startIndex() + 1
+                  if (startIndex > 0) g.writeNumberField("startIndex", startIndex)
+                  val stopIndex = c.stopIndex() + 1
+                  if (stopIndex > 0) g.writeNumberField("stopIndex", stopIndex)
+                  g.writeStringField("fragment", c.fragment())
+                case QueryContextType.DataFrame =>
+                  g.writeStringField("fragment", c.fragment())
+                  g.writeStringField("callSite", c.callSite())
+              }
               g.writeEndObject()
             }
             g.writeEndArray()
           }
           g.writeEndObject()
         }
-    }
-  }
-
-  def getMessage(throwable: Throwable): String = {
-    toJsonString { generator =>
-      val g = generator.setPrettyPrinter(new MinimalPrettyPrinter)
-      g.writeStartObject()
-      g.writeStringField("errorClass", throwable.getClass.getCanonicalName)
-      g.writeObjectFieldStart("messageParameters")
-      g.writeStringField("message", throwable.getMessage)
-      g.writeEndObject()
-      g.writeEndObject()
     }
   }
 }

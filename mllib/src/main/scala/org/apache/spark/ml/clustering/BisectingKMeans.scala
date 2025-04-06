@@ -21,7 +21,7 @@ import org.apache.hadoop.fs.Path
 
 import org.apache.spark.annotation.Since
 import org.apache.spark.ml.{Estimator, Model}
-import org.apache.spark.ml.linalg.Vector
+import org.apache.spark.ml.linalg._
 import org.apache.spark.ml.param._
 import org.apache.spark.ml.param.shared._
 import org.apache.spark.ml.util._
@@ -96,6 +96,9 @@ class BisectingKMeansModel private[ml] (
   extends Model[BisectingKMeansModel] with BisectingKMeansParams with MLWritable
   with HasTrainingSummary[BisectingKMeansSummary] {
 
+  // For ml connect only
+  private[ml] def this() = this("", null)
+
   @Since("3.0.0")
   lazy val numFeatures: Int = parentModel.clusterCenters.head.size
 
@@ -137,6 +140,9 @@ class BisectingKMeansModel private[ml] (
 
   @Since("2.0.0")
   def clusterCenters: Array[Vector] = parentModel.clusterCenters.map(_.asML)
+
+  private[ml] def clusterCenterMatrix: Matrix =
+    Matrices.fromVectors(clusterCenters.toSeq)
 
   /**
    * Computes the sum of squared distances between the input points and their corresponding cluster
@@ -186,7 +192,7 @@ object BisectingKMeansModel extends MLReadable[BisectingKMeansModel] {
 
     override protected def saveImpl(path: String): Unit = {
       // Save metadata and Params
-      DefaultParamsWriter.saveMetadata(instance, path, sc)
+      DefaultParamsWriter.saveMetadata(instance, path, sparkSession)
       val dataPath = new Path(path, "data").toString
       instance.parentModel.save(sc, dataPath)
     }
@@ -198,7 +204,7 @@ object BisectingKMeansModel extends MLReadable[BisectingKMeansModel] {
     private val className = classOf[BisectingKMeansModel].getName
 
     override def load(path: String): BisectingKMeansModel = {
-      val metadata = DefaultParamsReader.loadMetadata(path, sc, className)
+      val metadata = DefaultParamsReader.loadMetadata(path, sparkSession, className)
       val dataPath = new Path(path, "data").toString
       val mllibModel = MLlibBisectingKMeansModel.load(sc, dataPath)
       val model = new BisectingKMeansModel(metadata.uid, mllibModel)

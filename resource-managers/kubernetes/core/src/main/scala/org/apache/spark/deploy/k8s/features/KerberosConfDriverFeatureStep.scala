@@ -19,7 +19,7 @@ package org.apache.spark.deploy.k8s.features
 import java.io.File
 import java.nio.charset.StandardCharsets
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import com.google.common.io.Files
 import io.fabric8.kubernetes.api.model._
@@ -229,7 +229,7 @@ private[spark] class KerberosConfDriverFeatureStep(kubernetesConf: KubernetesDri
             .endMetadata()
           .withImmutable(true)
           .addToData(
-            Map(file.getName() -> Files.toString(file, StandardCharsets.UTF_8)).asJava)
+            Map(file.getName() -> Files.asCharSource(file, StandardCharsets.UTF_8).read()).asJava)
           .build()
       }
     } ++ {

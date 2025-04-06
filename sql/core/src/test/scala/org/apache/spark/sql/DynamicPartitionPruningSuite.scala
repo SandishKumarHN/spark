@@ -246,7 +246,7 @@ abstract class DynamicPartitionPruningSuiteBase
 
     val buf = collectDynamicPruningExpressions(df.queryExecution.executedPlan).collect {
       case InSubqueryExec(_, b: SubqueryBroadcastExec, _, _, _, _) =>
-        b.index
+        b.indices.map(idx => b.buildKeys(idx))
     }
     assert(buf.distinct.size == n)
   }
@@ -1217,7 +1217,8 @@ abstract class DynamicPartitionPruningSuiteBase
   test("SPARK-32509: Unused Dynamic Pruning filter shouldn't affect " +
     "canonicalization and exchange reuse") {
     withSQLConf(SQLConf.DYNAMIC_PARTITION_PRUNING_REUSE_BROADCAST_ONLY.key -> "true") {
-      withSQLConf(SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1") {
+      withSQLConf(SQLConf.AUTO_BROADCASTJOIN_THRESHOLD.key -> "-1",
+          SQLConf.V2_BUCKETING_ENABLED.key -> "false") {
         val df = sql(
           """ WITH view1 as (
             |   SELECT f.store_id FROM fact_stats f WHERE f.units_sold = 70
@@ -1370,7 +1371,8 @@ abstract class DynamicPartitionPruningSuiteBase
         }
 
         assert(subqueryIds.size == 2, "Whole plan subquery reusing not working correctly")
-        assert(reusedSubqueryIds.size == 1, "Whole plan subquery reusing not working correctly")
+        assert(reusedSubqueryIds.distinct.size == 1,
+          "Whole plan subquery reusing not working correctly")
         assert(reusedSubqueryIds.forall(subqueryIds.contains(_)),
           "ReusedSubqueryExec should reuse an existing subquery")
       }
@@ -1657,7 +1659,7 @@ abstract class DynamicPartitionPruningDataSourceSuiteBase
   test("no partition pruning when the build side is a stream") {
     withTable("fact") {
       val input = MemoryStream[Int]
-      val stream = input.toDF.select($"value" as "one", ($"value" * 3) as "code")
+      val stream = input.toDF().select($"value" as "one", ($"value" * 3) as "code")
       spark.range(100).select(
         $"id",
         ($"id" + 1).as("one"),

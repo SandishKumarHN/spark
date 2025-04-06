@@ -22,7 +22,7 @@ import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, CodeGe
 import org.apache.spark.sql.catalyst.expressions.codegen.Block._
 import org.apache.spark.sql.types.{DataType, NumericType}
 
-case class TryEval(child: Expression) extends UnaryExpression with NullIntolerant {
+case class TryEval(child: Expression) extends UnaryExpression {
   override def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
     val childGen = child.genCode(ctx)
     ev.copy(code = code"""
@@ -48,6 +48,7 @@ case class TryEval(child: Expression) extends UnaryExpression with NullIntoleran
   override def dataType: DataType = child.dataType
 
   override def nullable: Boolean = true
+  override def nullIntolerant: Boolean = true
 
   override protected def withNewChildInternal(newChild: Expression): Expression =
     copy(child = newChild)
@@ -124,6 +125,43 @@ case class TryDivide(left: Expression, right: Expression, replacement: Expressio
   )
 
   override def prettyName: String = "try_divide"
+
+  override def parameters: Seq[Expression] = Seq(left, right)
+
+  override protected def withNewChildInternal(newChild: Expression): Expression = {
+    copy(replacement = newChild)
+  }
+}
+
+// scalastyle:off line.size.limit
+@ExpressionDescription(
+  usage = "_FUNC_(dividend, divisor) - Returns the remainder after `expr1`/`expr2`. " +
+    "`dividend` must be a numeric. `divisor` must be a numeric.",
+  examples = """
+    Examples:
+      > SELECT _FUNC_(3, 2);
+       1
+      > SELECT _FUNC_(2L, 2L);
+       0
+      > SELECT _FUNC_(3.0, 2.0);
+       1.0
+      > SELECT _FUNC_(1, 0);
+       NULL
+  """,
+  since = "4.0.0",
+  group = "math_funcs")
+// scalastyle:on line.size.limit
+case class TryMod(left: Expression, right: Expression, replacement: Expression)
+  extends RuntimeReplaceable with InheritAnalysisRules {
+  def this(left: Expression, right: Expression) = this(left, right,
+    (left.dataType, right.dataType) match {
+      case (_: NumericType, _: NumericType) => Remainder(left, right, EvalMode.TRY)
+      // TODO: support TRY eval mode on datetime arithmetic expressions.
+      case _ => TryEval(Remainder(left, right, EvalMode.ANSI))
+    }
+  )
+
+  override def prettyName: String = "try_mod"
 
   override def parameters: Seq[Expression] = Seq(left, right)
 
@@ -236,3 +274,35 @@ case class TryToBinary(
   override protected def withNewChildInternal(newChild: Expression): Expression =
     this.copy(replacement = newChild)
 }
+
+// scalastyle:off line.size.limit
+@ExpressionDescription(
+  usage = "_FUNC_(class, method[, arg1[, arg2 ..]]) - This is a special version of `reflect` that" +
+    " performs the same operation, but returns a NULL value instead of raising an error if the invoke method thrown exception.",
+  examples = """
+    Examples:
+      > SELECT _FUNC_('java.util.UUID', 'randomUUID');
+       c33fb387-8500-4bfa-81d2-6e0e3e930df2
+      > SELECT _FUNC_('java.util.UUID', 'fromString', 'a5cf6c42-0c85-418f-af6c-3e4e5b1328f2');
+       a5cf6c42-0c85-418f-af6c-3e4e5b1328f2
+      > SELECT _FUNC_('java.net.URLDecoder', 'decode', '%');
+       NULL
+  """,
+  since = "4.0.0",
+  group = "misc_funcs")
+// scalastyle:on line.size.limit
+case class TryReflect(params: Seq[Expression], replacement: Expression) extends RuntimeReplaceable
+  with InheritAnalysisRules {
+
+  def this(params: Seq[Expression]) = this(params,
+    CallMethodViaReflection(params, failOnError = false))
+
+  override def prettyName: String = "try_reflect"
+
+  override def parameters: Seq[Expression] = params
+
+  override protected def withNewChildInternal(newChild: Expression): Expression = {
+    copy(replacement = newChild)
+  }
+}
+

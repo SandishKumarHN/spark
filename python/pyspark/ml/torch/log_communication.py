@@ -83,7 +83,7 @@ class LogStreamingServer:
 
         self.port = LogStreamingServer._get_free_port(spark_host_address)
         self.serve_thread = threading.Thread(target=serve_task, args=(self.port,))
-        self.serve_thread.setDaemon(True)
+        self.serve_thread.daemon = True
         self.serve_thread.start()
 
     def shutdown(self) -> None:
@@ -156,6 +156,9 @@ class LogStreamingClient(LogStreamingClientBase):
         warnings.warn(f"{error_msg}: {traceback.format_exc()}\n")
 
     def _connect(self) -> None:
+        if self.port == -1:
+            self._fail("Log streaming server is not available.")
+            return
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(self.timeout)

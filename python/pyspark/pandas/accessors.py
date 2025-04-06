@@ -27,7 +27,6 @@ import pandas as pd
 from pyspark.sql import functions as F
 from pyspark.sql.functions import pandas_udf
 from pyspark.sql.types import DataType, LongType, StructField, StructType
-
 from pyspark.pandas._typing import DataFrameOrSeries, Name
 from pyspark.pandas.internal import (
     InternalField,
@@ -937,7 +936,7 @@ class PandasOnSparkSeriesMethods:
 
         def pandas_concat(*series: pd.Series) -> pd.DataFrame:
             # The input can only be a DataFrame for struct from Spark 3.0.
-            # This works around makeing the input as a frame. See SPARK-27240
+            # This works around making the input as a frame. See SPARK-27240
             pdf = pd.concat(series, axis=1)
             pdf.columns = columns
             return pdf

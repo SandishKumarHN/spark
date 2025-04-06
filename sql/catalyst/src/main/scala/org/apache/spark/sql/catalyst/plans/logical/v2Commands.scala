@@ -17,20 +17,30 @@
 
 package org.apache.spark.sql.catalyst.plans.logical
 
+import org.apache.spark.{SparkIllegalArgumentException, SparkUnsupportedOperationException}
 import org.apache.spark.sql.AnalysisException
-import org.apache.spark.sql.catalyst.analysis.{AnalysisContext, AssignmentUtils, EliminateSubqueryAliases, FieldName, NamedRelation, PartitionSpec, ResolvedIdentifier, UnresolvedException}
+import org.apache.spark.sql.catalyst.analysis.{AnalysisContext, AssignmentUtils, EliminateSubqueryAliases, FieldName, NamedRelation, PartitionSpec, ResolvedIdentifier, ResolvedProcedure, TypeCheckResult, UnresolvedException, UnresolvedProcedure, ViewSchemaMode}
+import org.apache.spark.sql.catalyst.analysis.TypeCheckResult.{DataTypeMismatch, TypeCheckSuccess}
+import org.apache.spark.sql.catalyst.catalog.{FunctionResource, RoutineLanguage}
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
-import org.apache.spark.sql.catalyst.catalog.FunctionResource
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, AttributeSet, Expression, MetadataAttribute, NamedExpression, Unevaluable, V2ExpressionUtils}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, AttributeSet, Expression, MetadataAttribute, UnaryExpression, Unevaluable, V2ExpressionUtils}
 import org.apache.spark.sql.catalyst.plans.DescribeCommandSchema
 import org.apache.spark.sql.catalyst.trees.BinaryLike
-import org.apache.spark.sql.catalyst.util.{CharVarcharUtils, RowDeltaUtils, WriteDeltaProjections}
+import org.apache.spark.sql.catalyst.types.DataTypeUtils
+import org.apache.spark.sql.catalyst.util.{quoteIfNeeded, truncatedString, CharVarcharUtils, ReplaceDataProjections, RowDeltaUtils, WriteDeltaProjections}
+import org.apache.spark.sql.catalyst.util.TypeUtils.{ordinalNumber, toSQLExpr}
 import org.apache.spark.sql.connector.catalog._
+import org.apache.spark.sql.connector.catalog.CatalogV2Implicits.{IdentifierHelper, MultipartIdentifierHelper}
+import org.apache.spark.sql.connector.catalog.procedures.BoundProcedure
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.connector.write.{DeltaWrite, RowLevelOperation, RowLevelOperationTable, SupportsDelta, Write}
+import org.apache.spark.sql.connector.write.RowLevelOperation.Command.{DELETE, MERGE, UPDATE}
+import org.apache.spark.sql.errors.DataTypeErrors.toSQLType
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.types.{BooleanType, DataType, IntegerType, MetadataBuilder, StringType, StructField, StructType}
+import org.apache.spark.sql.types.{BooleanType, DataType, IntegerType, MapType, MetadataBuilder, StringType, StructType}
+import org.apache.spark.util.ArrayImplicits._
+import org.apache.spark.util.Utils
 
 // For v2 DML commands, it may end up with the v1 fallback code path and need to build a DataFrame
 // which is required by the DS v1 API. We need to keep the analyzed input query plan to build
@@ -45,7 +55,7 @@ trait KeepAnalyzedQuery extends Command {
 /**
  * Base trait for DataSourceV2 write commands
  */
-trait V2WriteCommand extends UnaryCommand with KeepAnalyzedQuery {
+trait V2WriteCommand extends UnaryCommand with KeepAnalyzedQuery with CTEInChildren {
   def table: NamedRelation
   def query: LogicalPlan
   def isByName: Boolean
@@ -58,15 +68,19 @@ trait V2WriteCommand extends UnaryCommand with KeepAnalyzedQuery {
     assert(table.resolved && query.resolved,
       "`outputResolved` can only be called when `table` and `query` are both resolved.")
     // If the table doesn't require schema match, we don't need to resolve the output columns.
-    table.skipSchemaResolution || (query.output.size == table.output.size &&
-      query.output.zip(table.output).forall {
-        case (inAttr, outAttr) =>
-          val outType = CharVarcharUtils.getRawType(outAttr.metadata).getOrElse(outAttr.dataType)
-          // names and types must match, nullability must be compatible
-          inAttr.name == outAttr.name &&
-            DataType.equalsIgnoreCompatibleNullability(inAttr.dataType, outType) &&
-            (outAttr.nullable || !inAttr.nullable)
-      })
+    table.skipSchemaResolution || areCompatible(query.output, table.output)
+  }
+
+  protected def areCompatible(inAttrs: Seq[Attribute], outAttrs: Seq[Attribute]): Boolean = {
+    inAttrs.size == outAttrs.size && inAttrs.zip(outAttrs).forall {
+      case (inAttr, outAttr) =>
+        val inType = CharVarcharUtils.getRawType(inAttr.metadata).getOrElse(inAttr.dataType)
+        val outType = CharVarcharUtils.getRawType(outAttr.metadata).getOrElse(outAttr.dataType)
+        // names and types must match, nullability must be compatible
+        inAttr.name == outAttr.name &&
+          DataType.equalsIgnoreCompatibleNullability(inType, outType) &&
+          (outAttr.nullable || !inAttr.nullable)
+    }
   }
 
   def withNewQuery(newQuery: LogicalPlan): V2WriteCommand
@@ -200,6 +214,17 @@ trait RowLevelWrite extends V2WriteCommand with SupportsSubquery {
   def operation: RowLevelOperation
   def condition: Expression
   def originalTable: NamedRelation
+
+  protected def operationResolved: Boolean = {
+    val attr = query.output.head
+    attr.name == RowDeltaUtils.OPERATION_COLUMN && attr.dataType == IntegerType && !attr.nullable
+  }
+
+  protected def projectedMetadataAttrs: Seq[Attribute] = {
+    V2ExpressionUtils.resolveRefs[AttributeReference](
+      operation.requiredMetadataAttributes.toImmutableArraySeq,
+      originalTable)
+  }
 }
 
 /**
@@ -212,6 +237,7 @@ trait RowLevelWrite extends V2WriteCommand with SupportsSubquery {
  * @param condition a condition that defines matching groups
  * @param query a query with records that should replace the records that were read
  * @param originalTable a plan for the original table for which the row-level command was triggered
+ * @param groupFilterCondition a condition that can be used to filter groups at runtime
  * @param write a logical write, if already constructed
  */
 case class ReplaceData(
@@ -219,6 +245,8 @@ case class ReplaceData(
     condition: Expression,
     query: LogicalPlan,
     originalTable: NamedRelation,
+    projections: ReplaceDataProjections,
+    groupFilterCondition: Option[Expression] = None,
     write: Option[Write] = None) extends RowLevelWrite {
 
   override val isByName: Boolean = false
@@ -231,35 +259,39 @@ case class ReplaceData(
       case DataSourceV2Relation(RowLevelOperationTable(_, operation), _, _, _, _) =>
         operation
       case _ =>
-        throw new AnalysisException(s"Cannot retrieve row-level operation from $table")
-    }
-  }
-
-  // the incoming query may include metadata columns
-  lazy val dataInput: Seq[Attribute] = {
-    query.output.filter {
-      case MetadataAttribute(_) => false
-      case _ => true
+        throw new AnalysisException(
+          errorClass = "_LEGACY_ERROR_TEMP_3057",
+          messageParameters = Map("table" -> table.toString))
     }
   }
 
   override def outputResolved: Boolean = {
     assert(table.resolved && query.resolved,
       "`outputResolved` can only be called when `table` and `query` are both resolved.")
+    operationResolved && rowAttrsResolved && metadataAttrsResolved
+  }
 
-    // take into account only incoming data columns and ignore metadata columns in the query
-    // they will be discarded after the logical write is built in the optimizer
-    // metadata columns may be needed to request a correct distribution or ordering
-    // but are not passed back to the data source during writes
+  // validates row projection output is compatible with table attributes
+  private def rowAttrsResolved: Boolean = {
+    val inRowAttrs = DataTypeUtils.toAttributes(projections.rowProjection.schema)
+    table.skipSchemaResolution || areCompatible(inRowAttrs, table.output)
+  }
 
-    table.skipSchemaResolution || (dataInput.size == table.output.size &&
-      dataInput.zip(table.output).forall { case (inAttr, outAttr) =>
-        val outType = CharVarcharUtils.getRawType(outAttr.metadata).getOrElse(outAttr.dataType)
-        // names and types must match, nullability must be compatible
-        inAttr.name == outAttr.name &&
-          DataType.equalsIgnoreCompatibleNullability(inAttr.dataType, outType) &&
-          (outAttr.nullable || !inAttr.nullable)
-      })
+  // validates metadata projection output is compatible with metadata attributes
+  private def metadataAttrsResolved: Boolean = {
+    val outMetadataAttrs = projectedMetadataAttrs.map {
+      case attr if isMetadataNullabilityPreserved(attr) => attr
+      case attr => attr.withNullability(true)
+    }
+    val inMetadataAttrs = projections.metadataProjection match {
+      case Some(projection) => DataTypeUtils.toAttributes(projection.schema)
+      case None => Nil
+    }
+    areCompatible(inMetadataAttrs, outMetadataAttrs)
+  }
+
+  private def isMetadataNullabilityPreserved(attr: Attribute): Boolean = {
+    operation.command == DELETE || MetadataAttribute.isPreservedOnUpdate(attr)
   }
 
   override def withNewQuery(newQuery: LogicalPlan): ReplaceData = copy(query = newQuery)
@@ -309,72 +341,61 @@ case class WriteDelta(
       case DataSourceV2Relation(RowLevelOperationTable(_, operation), _, _, _, _) =>
         operation.asInstanceOf[SupportsDelta]
       case _ =>
-        throw new AnalysisException(s"Cannot retrieve row-level operation from $table")
+        throw new AnalysisException(
+          errorClass = "_LEGACY_ERROR_TEMP_3057",
+          messageParameters = Map("table" -> table.toString))
     }
   }
 
   override def outputResolved: Boolean = {
     assert(table.resolved && query.resolved,
       "`outputResolved` can only be called when `table` and `query` are both resolved.")
-
     operationResolved && rowAttrsResolved && rowIdAttrsResolved && metadataAttrsResolved
-  }
-
-  private def operationResolved: Boolean = {
-    val attr = query.output.head
-    attr.name == RowDeltaUtils.OPERATION_COLUMN && attr.dataType == IntegerType && !attr.nullable
   }
 
   // validates row projection output is compatible with table attributes
   private def rowAttrsResolved: Boolean = {
-    table.skipSchemaResolution || (projections.rowProjection match {
-      case Some(projection) =>
-        table.output.size == projection.schema.size &&
-          projection.schema.zip(table.output).forall { case (field, outAttr) =>
-            isCompatible(field, outAttr)
-          }
-      case None =>
-        true
-    })
+    val outRowAttrs = if (operation.command == DELETE) Nil else table.output
+    val inRowAttrs = projections.rowProjection match {
+      case Some(projection) => DataTypeUtils.toAttributes(projection.schema)
+      case None => Nil
+    }
+    table.skipSchemaResolution || areCompatible(inRowAttrs, outRowAttrs)
   }
 
   // validates row ID projection output is compatible with row ID attributes
   private def rowIdAttrsResolved: Boolean = {
-    val rowIdAttrs = V2ExpressionUtils.resolveRefs[AttributeReference](
-      operation.rowId,
+    val outRowIdAttrs = V2ExpressionUtils.resolveRefs[AttributeReference](
+      operation.rowId.toImmutableArraySeq,
       originalTable)
-
-    val projectionSchema = projections.rowIdProjection.schema
-    rowIdAttrs.size == projectionSchema.size && projectionSchema.forall { field =>
-      rowIdAttrs.exists(rowIdAttr => isCompatible(field, rowIdAttr))
-    }
+    val inRowIdAttrs = DataTypeUtils.toAttributes(projections.rowIdProjection.schema)
+    areCompatible(inRowIdAttrs, outRowIdAttrs)
   }
 
   // validates metadata projection output is compatible with metadata attributes
   private def metadataAttrsResolved: Boolean = {
-    projections.metadataProjection match {
-      case Some(projection) =>
-        val metadataAttrs = V2ExpressionUtils.resolveRefs[AttributeReference](
-          operation.requiredMetadataAttributes,
-          originalTable)
-
-        val projectionSchema = projection.schema
-        metadataAttrs.size == projectionSchema.size && projectionSchema.forall { field =>
-          metadataAttrs.exists(metadataAttr => isCompatible(field, metadataAttr))
-        }
-      case None =>
-        true
+    val outMetadataAttrs = projectedMetadataAttrs.map {
+      case attr if isMetadataNullabilityPreserved(attr) => attr
+      case attr => attr.withNullability(true)
     }
+    val inMetadataAttrs = projections.metadataProjection match {
+      case Some(projection) => DataTypeUtils.toAttributes(projection.schema)
+      case None => Nil
+    }
+    areCompatible(inMetadataAttrs, outMetadataAttrs)
   }
 
-  // checks if a projection field is compatible with a table attribute
-  private def isCompatible(inField: StructField, outAttr: NamedExpression): Boolean = {
-    val inType = CharVarcharUtils.getRawType(inField.metadata).getOrElse(inField.dataType)
-    val outType = CharVarcharUtils.getRawType(outAttr.metadata).getOrElse(outAttr.dataType)
-    // names and types must match, nullability must be compatible
-    inField.name == outAttr.name &&
-      DataType.equalsIgnoreCompatibleNullability(inType, outType) &&
-      (outAttr.nullable || !inField.nullable)
+  private def isMetadataNullabilityPreserved(attr: Attribute): Boolean = {
+    operation.command match {
+      case DELETE =>
+        MetadataAttribute.isPreservedOnDelete(attr)
+      case UPDATE | MERGE if operation.representUpdateAsDeleteAndInsert =>
+        MetadataAttribute.isPreservedOnDelete(attr) && MetadataAttribute.isPreservedOnReinsert(attr)
+      case UPDATE =>
+        MetadataAttribute.isPreservedOnUpdate(attr)
+      case MERGE =>
+        MetadataAttribute.isPreservedOnDelete(attr) && MetadataAttribute.isPreservedOnUpdate(attr)
+    }
   }
 
   override def withNewQuery(newQuery: LogicalPlan): V2WriteCommand = copy(query = newQuery)
@@ -389,19 +410,42 @@ case class WriteDelta(
   }
 }
 
-trait V2CreateTableAsSelectPlan extends V2CreateTablePlan with AnalysisOnlyCommand {
+trait V2CreateTableAsSelectPlan
+  extends V2CreateTablePlan
+    with AnalysisOnlyCommand
+    with CTEInChildren {
   def query: LogicalPlan
+
+  override def withCTEDefs(cteDefs: Seq[CTERelationDef]): LogicalPlan = {
+    withNameAndQuery(newName = name, newQuery = WithCTE(query, cteDefs))
+  }
 
   override lazy val resolved: Boolean = childrenResolved && {
     // the table schema is created from the query schema, so the only resolution needed is to check
     // that the columns referenced by the table's partitioning exist in the query schema
     val references = partitioning.flatMap(_.references).toSet
-    references.map(_.fieldNames).forall(query.schema.findNestedField(_).isDefined)
+    references.map(_.fieldNames.toImmutableArraySeq)
+      .forall(query.schema.findNestedField(_).isDefined)
   }
 
   override def childrenToAnalyze: Seq[LogicalPlan] = Seq(name, query)
 
-  override def tableSchema: StructType = query.schema
+  override lazy val tableSchema: StructType = query.schema
+
+  override def columns: Seq[ColumnDefinition] = {
+    query.schema.map { field =>
+      ColumnDefinition(
+        field.name,
+        field.dataType,
+        field.nullable,
+        field.getComment(),
+        // The input query can't define column default/generation expressions.
+        defaultValue = None,
+        generationExpression = None,
+        metadata = field.metadata
+      )
+    }
+  }
 
   override protected def withNewChildrenInternal(
       newChildren: IndexedSeq[LogicalPlan]): V2CreateTableAsSelectPlan = {
@@ -410,7 +454,9 @@ trait V2CreateTableAsSelectPlan extends V2CreateTablePlan with AnalysisOnlyComma
       case Seq(newName, newQuery) =>
         withNameAndQuery(newName, newQuery)
       case others =>
-        throw new IllegalArgumentException("Must be 2 children: " + others)
+        throw new SparkIllegalArgumentException(
+          errorClass = "_LEGACY_ERROR_TEMP_3218",
+          messageParameters = Map("others" -> others.toString()))
     }
   }
 
@@ -422,8 +468,12 @@ trait V2CreateTableAsSelectPlan extends V2CreateTablePlan with AnalysisOnlyComma
 /** A trait used for logical plan nodes that create or replace V2 table definitions. */
 trait V2CreateTablePlan extends LogicalPlan {
   def name: LogicalPlan
+
   def partitioning: Seq[Transform]
-  def tableSchema: StructType
+
+  def columns: Seq[ColumnDefinition]
+
+  lazy val tableSchema: StructType = StructType(columns.map(_.toV1Column))
 
   def tableName: Identifier = {
     assert(name.resolved)
@@ -442,10 +492,11 @@ trait V2CreateTablePlan extends LogicalPlan {
  */
 case class CreateTable(
     name: LogicalPlan,
-    tableSchema: StructType,
+    columns: Seq[ColumnDefinition],
     partitioning: Seq[Transform],
-    tableSpec: TableSpec,
-    ignoreIfExists: Boolean) extends UnaryCommand with V2CreateTablePlan {
+    tableSpec: TableSpecBase,
+    ignoreIfExists: Boolean)
+  extends UnaryCommand with V2CreateTablePlan {
 
   override def child: LogicalPlan = name
 
@@ -464,7 +515,7 @@ case class CreateTableAsSelect(
     name: LogicalPlan,
     partitioning: Seq[Transform],
     query: LogicalPlan,
-    tableSpec: TableSpec,
+    tableSpec: TableSpecBase,
     writeOptions: Map[String, String],
     ignoreIfExists: Boolean,
     isAnalyzed: Boolean = false)
@@ -493,10 +544,11 @@ case class CreateTableAsSelect(
  */
 case class ReplaceTable(
     name: LogicalPlan,
-    tableSchema: StructType,
+    columns: Seq[ColumnDefinition],
     partitioning: Seq[Transform],
-    tableSpec: TableSpec,
-    orCreate: Boolean) extends UnaryCommand with V2CreateTablePlan {
+    tableSpec: TableSpecBase,
+    orCreate: Boolean)
+  extends UnaryCommand with V2CreateTablePlan {
 
   override def child: LogicalPlan = name
 
@@ -518,7 +570,7 @@ case class ReplaceTableAsSelect(
     name: LogicalPlan,
     partitioning: Seq[Transform],
     query: LogicalPlan,
-    tableSpec: TableSpec,
+    tableSpec: TableSpecBase,
     writeOptions: Map[String, String],
     orCreate: Boolean,
     isAnalyzed: Boolean = false)
@@ -605,24 +657,6 @@ case class SetNamespaceLocation(
 }
 
 /**
- * The logical plan of the SHOW NAMESPACES command.
- */
-case class ShowNamespaces(
-    namespace: LogicalPlan,
-    pattern: Option[String],
-    override val output: Seq[Attribute] = ShowNamespaces.getOutputAttrs) extends UnaryCommand {
-  override def child: LogicalPlan = namespace
-  override protected def withNewChildInternal(newChild: LogicalPlan): ShowNamespaces =
-    copy(namespace = newChild)
-}
-
-object ShowNamespaces {
-  def getOutputAttrs: Seq[Attribute] = {
-    Seq(AttributeReference("namespace", StringType, nullable = false)())
-  }
-}
-
-/**
  * The logical plan of the DESCRIBE relation_name command.
  */
 case class DescribeRelation(
@@ -687,6 +721,13 @@ case class UpdateTable(
 
   lazy val aligned: Boolean = AssignmentUtils.aligned(table.output, assignments)
 
+  lazy val rewritable: Boolean = {
+    EliminateSubqueryAliases(table) match {
+      case DataSourceV2Relation(_: SupportsRowLevelOperations, _, _, _, _) => true
+      case _ => false
+    }
+  }
+
   override def child: LogicalPlan = table
   override protected def withNewChildInternal(newChild: LogicalPlan): UpdateTable =
     copy(table = newChild)
@@ -707,7 +748,8 @@ case class MergeIntoTable(
     mergeCondition: Expression,
     matchedActions: Seq[MergeAction],
     notMatchedActions: Seq[MergeAction],
-    notMatchedBySourceActions: Seq[MergeAction]) extends BinaryCommand with SupportsSubquery {
+    notMatchedBySourceActions: Seq[MergeAction],
+    withSchemaEvolution: Boolean) extends BinaryCommand with SupportsSubquery {
 
   lazy val aligned: Boolean = {
     val actions = matchedActions ++ notMatchedActions ++ notMatchedBySourceActions
@@ -720,6 +762,13 @@ case class MergeIntoTable(
         AssignmentUtils.aligned(targetTable.output, assignments)
       case _ =>
         false
+    }
+  }
+
+  lazy val rewritable: Boolean = {
+    EliminateSubqueryAliases(targetTable) match {
+      case DataSourceV2Relation(_: SupportsRowLevelOperations, _, _, _, _) => true
+      case _ => false
     }
   }
 
@@ -738,10 +787,25 @@ case class MergeIntoTable(
     copy(targetTable = newLeft, sourceTable = newRight)
 }
 
+object MergeIntoTable {
+  def getWritePrivileges(
+      matchedActions: Iterable[MergeAction],
+      notMatchedActions: Iterable[MergeAction],
+      notMatchedBySourceActions: Iterable[MergeAction]): Seq[TableWritePrivilege] = {
+    val privileges = scala.collection.mutable.HashSet.empty[TableWritePrivilege]
+    (matchedActions.iterator ++ notMatchedActions ++ notMatchedBySourceActions).foreach {
+      case _: DeleteAction => privileges.add(TableWritePrivilege.DELETE)
+      case _: UpdateAction | _: UpdateStarAction => privileges.add(TableWritePrivilege.UPDATE)
+      case _: InsertAction | _: InsertStarAction => privileges.add(TableWritePrivilege.INSERT)
+    }
+    privileges.toSeq
+  }
+}
+
 sealed abstract class MergeAction extends Expression with Unevaluable {
   def condition: Option[Expression]
   override def nullable: Boolean = false
-  override def dataType: DataType = throw new UnresolvedException("nullable")
+  override def dataType: DataType = throw new UnresolvedException("dataType")
   override def children: Seq[Expression] = condition.toSeq
 }
 
@@ -858,24 +922,35 @@ object ShowTables {
 }
 
 /**
- * The logical plan of the SHOW TABLE EXTENDED command.
+ * The logical plan of the SHOW TABLE EXTENDED (without PARTITION) command.
  */
-case class ShowTableExtended(
+case class ShowTablesExtended(
     namespace: LogicalPlan,
     pattern: String,
-    partitionSpec: Option[PartitionSpec],
-    override val output: Seq[Attribute] = ShowTableExtended.getOutputAttrs) extends UnaryCommand {
+    override val output: Seq[Attribute] = ShowTablesUtils.getOutputAttrs) extends UnaryCommand {
   override def child: LogicalPlan = namespace
-  override protected def withNewChildInternal(newChild: LogicalPlan): ShowTableExtended =
+  override protected def withNewChildInternal(newChild: LogicalPlan): ShowTablesExtended =
     copy(namespace = newChild)
 }
 
-object ShowTableExtended {
+object ShowTablesUtils {
   def getOutputAttrs: Seq[Attribute] = Seq(
     AttributeReference("namespace", StringType, nullable = false)(),
     AttributeReference("tableName", StringType, nullable = false)(),
     AttributeReference("isTemporary", BooleanType, nullable = false)(),
     AttributeReference("information", StringType, nullable = false)())
+}
+
+/**
+ * The logical plan of the SHOW TABLE EXTENDED ... PARTITION ... command.
+ */
+case class ShowTablePartition(
+    table: LogicalPlan,
+    partitionSpec: PartitionSpec,
+    override val output: Seq[Attribute] = ShowTablesUtils.getOutputAttrs)
+  extends V2PartitionCommand {
+  override protected def withNewChildInternal(newChild: LogicalPlan): ShowTablePartition =
+    copy(table = newChild)
 }
 
 /**
@@ -976,6 +1051,26 @@ case class CreateFunction(
     ifExists: Boolean,
     replace: Boolean) extends UnaryCommand {
   override protected def withNewChildInternal(newChild: LogicalPlan): CreateFunction =
+    copy(child = newChild)
+}
+
+/**
+ * The logical plan of the CREATE FUNCTION command for SQL Functions.
+ */
+case class CreateUserDefinedFunction(
+    child: LogicalPlan,
+    inputParamText: Option[String],
+    returnTypeText: String,
+    exprText: Option[String],
+    queryText: Option[String],
+    comment: Option[String],
+    isDeterministic: Option[Boolean],
+    containsSQL: Option[Boolean],
+    language: RoutineLanguage,
+    isTableFunc: Boolean,
+    ignoreIfExists: Boolean,
+    replace: Boolean) extends UnaryCommand {
+  override protected def withNewChildInternal(newChild: LogicalPlan): CreateUserDefinedFunction =
     copy(child = newChild)
 }
 
@@ -1215,12 +1310,27 @@ case class RepairTable(
 case class AlterViewAs(
     child: LogicalPlan,
     originalText: String,
-    query: LogicalPlan) extends BinaryCommand {
+    query: LogicalPlan) extends BinaryCommand with CTEInChildren {
   override def left: LogicalPlan = child
   override def right: LogicalPlan = query
   override protected def withNewChildrenInternal(
       newLeft: LogicalPlan, newRight: LogicalPlan): LogicalPlan =
     copy(child = newLeft, query = newRight)
+
+  override def withCTEDefs(cteDefs: Seq[CTERelationDef]): LogicalPlan = {
+    withNewChildren(Seq(child, WithCTE(query, cteDefs)))
+  }
+}
+
+/**
+ * The logical plan of the ALTER VIEW ... WITH SCHEMA command.
+ */
+case class AlterViewSchemaBinding(
+    child: LogicalPlan,
+    viewSchemaMode: ViewSchemaMode)
+  extends UnaryCommand {
+  override protected def withNewChildInternal(newChild: LogicalPlan): LogicalPlan =
+    copy(child = newChild)
 }
 
 /**
@@ -1230,16 +1340,22 @@ case class CreateView(
     child: LogicalPlan,
     userSpecifiedColumns: Seq[(String, Option[String])],
     comment: Option[String],
+    collation: Option[String],
     properties: Map[String, String],
     originalText: Option[String],
     query: LogicalPlan,
     allowExisting: Boolean,
-    replace: Boolean) extends BinaryCommand {
+    replace: Boolean,
+    viewSchemaMode: ViewSchemaMode) extends BinaryCommand with CTEInChildren {
   override def left: LogicalPlan = child
   override def right: LogicalPlan = query
   override protected def withNewChildrenInternal(
       newLeft: LogicalPlan, newRight: LogicalPlan): LogicalPlan =
     copy(child = newLeft, query = newRight)
+
+  override def withCTEDefs(cteDefs: Seq[CTERelationDef]): LogicalPlan = {
+    withNewChildren(Seq(child, WithCTE(query, cteDefs)))
+  }
 }
 
 /**
@@ -1368,11 +1484,165 @@ case class DropIndex(
     copy(table = newChild)
 }
 
+trait TableSpecBase {
+  def properties: Map[String, String]
+  def provider: Option[String]
+  def location: Option[String]
+  def comment: Option[String]
+  def collation: Option[String]
+  def serde: Option[SerdeInfo]
+  def external: Boolean
+}
+
+case class UnresolvedTableSpec(
+    properties: Map[String, String],
+    provider: Option[String],
+    optionExpression: OptionList,
+    location: Option[String],
+    comment: Option[String],
+    collation: Option[String],
+    serde: Option[SerdeInfo],
+    external: Boolean) extends UnaryExpression with Unevaluable with TableSpecBase {
+
+  override def dataType: DataType =
+    throw new SparkUnsupportedOperationException("_LEGACY_ERROR_TEMP_3113")
+
+  override def child: Expression = optionExpression
+
+  override protected def withNewChildInternal(newChild: Expression): Expression =
+    this.copy(optionExpression = newChild.asInstanceOf[OptionList])
+
+  override def simpleString(maxFields: Int): String = {
+    this.copy(properties = Utils.redact(properties).toMap).toString
+  }
+}
+
+/**
+ * This contains the expressions in an OPTIONS list. We store it alongside anywhere the above
+ * UnresolvedTableSpec lives. We use a separate object so that tree traversals in analyzer rules can
+ * descend into the child expressions naturally without extra treatment.
+ */
+case class OptionList(options: Seq[(String, Expression)])
+  extends Expression with Unevaluable {
+  override def nullable: Boolean = true
+  override def dataType: DataType = MapType(StringType, StringType)
+  override def children: Seq[Expression] = options.map(_._2)
+  override lazy val resolved: Boolean = options.map(_._2).forall(_.resolved)
+
+  override protected def withNewChildrenInternal(
+    newChildren: IndexedSeq[Expression]): Expression = {
+    assert(options.length == newChildren.length)
+    val newOptions = options.zip(newChildren).map {
+      case ((key: String, _), newChild: Expression) =>
+        (key, newChild)
+    }
+    OptionList(newOptions)
+  }
+}
+
 case class TableSpec(
     properties: Map[String, String],
     provider: Option[String],
     options: Map[String, String],
     location: Option[String],
     comment: Option[String],
+    collation: Option[String],
     serde: Option[SerdeInfo],
-    external: Boolean)
+    external: Boolean) extends TableSpecBase {
+  def withNewLocation(newLocation: Option[String]): TableSpec = {
+    TableSpec(properties, provider, options, newLocation, comment, collation, serde, external)
+  }
+}
+
+/**
+ * The logical plan of the DECLARE [OR REPLACE] TEMPORARY VARIABLE command.
+ */
+case class CreateVariable(
+    name: LogicalPlan,
+    defaultExpr: DefaultValueExpression,
+    replace: Boolean) extends UnaryCommand with SupportsSubquery {
+  override def child: LogicalPlan = name
+  override protected def withNewChildInternal(newChild: LogicalPlan): LogicalPlan =
+    copy(name = newChild)
+}
+
+/**
+ * The logical plan of the DROP TEMPORARY VARIABLE command.
+ */
+case class DropVariable(
+    name: LogicalPlan,
+    ifExists: Boolean) extends UnaryCommand {
+  override def child: LogicalPlan = name
+  override protected def withNewChildInternal(newChild: LogicalPlan): LogicalPlan =
+    copy(name = newChild)
+}
+
+/**
+ * The logical plan of the SET VARIABLE command.
+ */
+case class SetVariable(
+    targetVariables: Seq[Expression],
+    sourceQuery: LogicalPlan)
+  extends UnaryCommand {
+  override def child: LogicalPlan = sourceQuery
+  override protected def withNewChildInternal(newChild: LogicalPlan): SetVariable =
+    copy(sourceQuery = newChild)
+}
+
+/**
+ * The logical plan of the CALL statement.
+ */
+case class Call(
+    procedure: LogicalPlan,
+    args: Seq[Expression],
+    execute: Boolean = true)
+  extends UnaryNode with ExecutableDuringAnalysis {
+
+  override def output: Seq[Attribute] = Nil
+
+  override def child: LogicalPlan = procedure
+
+  def bound: Boolean = procedure match {
+    case ResolvedProcedure(_, _, _: BoundProcedure) => true
+    case _ => false
+  }
+
+  def checkArgTypes(): TypeCheckResult = {
+    require(resolved && bound, "can check arg types only after resolution and binding")
+
+    val params = procedure match {
+      case ResolvedProcedure(_, _, bound: BoundProcedure) => bound.parameters
+    }
+    require(args.length == params.length, "number of args and params must match after binding")
+
+    args.zip(params).zipWithIndex.collectFirst {
+      case ((arg, param), idx)
+          if !DataType.equalsIgnoreCompatibleNullability(arg.dataType, param.dataType) =>
+        DataTypeMismatch(
+          errorSubClass = "UNEXPECTED_INPUT_TYPE",
+          messageParameters = Map(
+            "paramIndex" -> ordinalNumber(idx),
+            "requiredType" -> toSQLType(param.dataType),
+            "inputSql" -> toSQLExpr(arg),
+            "inputType" -> toSQLType(arg.dataType)))
+    }.getOrElse(TypeCheckSuccess)
+  }
+
+  override def simpleString(maxFields: Int): String = {
+    val name = procedure match {
+      case ResolvedProcedure(catalog, ident, _) =>
+        s"${quoteIfNeeded(catalog.name)}.${ident.quoted}"
+      case UnresolvedProcedure(nameParts) =>
+        nameParts.quoted
+    }
+    val argsString = truncatedString(args, ", ", maxFields)
+    s"Call $name($argsString)"
+  }
+
+  override def stageForExplain(): Call = {
+    copy(execute = false)
+  }
+
+  override protected def withNewChildInternal(newChild: LogicalPlan): Call =
+    copy(procedure = newChild)
+}

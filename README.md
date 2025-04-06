@@ -1,16 +1,16 @@
 # Apache Spark
 
 Spark is a unified analytics engine for large-scale data processing. It provides
-high-level APIs in Scala, Java, Python, and R, and an optimized engine that
+high-level APIs in Scala, Java, Python, and R (Deprecated), and an optimized engine that
 supports general computation graphs for data analysis. It also supports a
 rich set of higher-level tools including Spark SQL for SQL and DataFrames,
 pandas API on Spark for pandas workloads, MLlib for machine learning, GraphX for graph processing,
 and Structured Streaming for stream processing.
 
-<https://spark.apache.org/>
+- Official version: <https://spark.apache.org/>
+- Development version: <https://apache.github.io/spark/>
 
 [![GitHub Actions Build](https://github.com/apache/spark/actions/workflows/build_main.yml/badge.svg)](https://github.com/apache/spark/actions/workflows/build_main.yml)
-[![AppVeyor Build](https://img.shields.io/appveyor/ci/ApacheSoftwareFoundation/spark/master.svg?style=plastic&logo=appveyor)](https://ci.appveyor.com/project/ApacheSoftwareFoundation/spark)
 [![PySpark Coverage](https://codecov.io/gh/apache/spark/branch/master/graph/badge.svg)](https://codecov.io/gh/apache/spark)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/pyspark?period=month&units=international_system&left_color=black&right_color=orange&left_text=PyPI%20downloads)](https://pypi.org/project/pyspark/)
 
@@ -77,7 +77,7 @@ To run one of them, use `./bin/run-example <class> [params]`. For example:
 will run the Pi example locally.
 
 You can set the MASTER environment variable when running examples to submit
-examples to a cluster. This can be a mesos:// or spark:// URL,
+examples to a cluster. This can be spark:// URL,
 "yarn" to run on YARN, and "local" to run
 locally with one thread, or "local[N]" to run locally with N threads. You
 can also use an abbreviated class name if the class is in the `examples`

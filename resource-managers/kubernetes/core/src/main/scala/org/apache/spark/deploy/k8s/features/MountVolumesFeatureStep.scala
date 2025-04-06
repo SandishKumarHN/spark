@@ -16,20 +16,25 @@
  */
 package org.apache.spark.deploy.k8s.features
 
-import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
+import scala.jdk.CollectionConverters._
 
 import io.fabric8.kubernetes.api.model._
 
 import org.apache.spark.deploy.k8s._
+import org.apache.spark.deploy.k8s.Config.KUBERNETES_USE_LEGACY_PVC_ACCESS_MODE
 import org.apache.spark.deploy.k8s.Constants.{ENV_EXECUTOR_ID, SPARK_APP_ID_LABEL}
-import org.apache.spark.internal.config.EXECUTOR_INSTANCES
 
 private[spark] class MountVolumesFeatureStep(conf: KubernetesConf)
   extends KubernetesFeatureConfigStep {
   import MountVolumesFeatureStep._
 
   val additionalResources = ArrayBuffer.empty[HasMetadata]
+  val accessMode = if (conf.get(KUBERNETES_USE_LEGACY_PVC_ACCESS_MODE)) {
+    "ReadWriteOnce"
+  } else {
+    PVC_ACCESS_MODE
+  }
 
   override def configurePod(pod: SparkPod): SparkPod = {
     val (volumeMounts, volumes) = constructVolumes(conf.volumes).unzip
@@ -60,19 +65,18 @@ private[spark] class MountVolumesFeatureStep(conf: KubernetesConf)
         .withMountPath(spec.mountPath)
         .withReadOnly(spec.mountReadOnly)
         .withSubPath(spec.mountSubPath)
+        .withSubPathExpr(spec.mountSubPathExpr)
         .withName(spec.volumeName)
         .build()
 
       val volumeBuilder = spec.volumeConf match {
-        case KubernetesHostPathVolumeConf(hostPath) =>
-          /* "" means that no checks will be performed before mounting the hostPath volume */
+        case KubernetesHostPathVolumeConf(hostPath, volumeType) =>
           new VolumeBuilder()
-            .withHostPath(new HostPathVolumeSource(hostPath, ""))
+            .withHostPath(new HostPathVolumeSource(hostPath, volumeType))
 
-        case KubernetesPVCVolumeConf(claimNameTemplate, storageClass, size) =>
+        case KubernetesPVCVolumeConf(claimNameTemplate, storageClass, size, labels, annotations) =>
           val claimName = conf match {
             case c: KubernetesExecutorConf =>
-              checkPVCClaimName(claimNameTemplate)
               claimNameTemplate
                 .replaceAll(PVC_ON_DEMAND,
                   s"${conf.resourceNamePrefix}-exec-${c.executorId}$PVC_POSTFIX-$i")
@@ -82,17 +86,27 @@ private[spark] class MountVolumesFeatureStep(conf: KubernetesConf)
                 .replaceAll(PVC_ON_DEMAND, s"${conf.resourceNamePrefix}-driver$PVC_POSTFIX-$i")
           }
           if (storageClass.isDefined && size.isDefined) {
+            val defaultVolumeLabels = Map(SPARK_APP_ID_LABEL -> conf.appId)
+            val volumeLabels = labels match {
+              case Some(customLabelsMap) => (customLabelsMap ++ defaultVolumeLabels).asJava
+              case None => defaultVolumeLabels.asJava
+            }
+            val volumeAnnotations = annotations match {
+              case Some(value) => value.asJava
+              case None => Map[String, String]().asJava
+            }
             additionalResources.append(new PersistentVolumeClaimBuilder()
               .withKind(PVC)
               .withApiVersion("v1")
               .withNewMetadata()
                 .withName(claimName)
-                .addToLabels(SPARK_APP_ID_LABEL, conf.appId)
+                .addToLabels(volumeLabels)
+                .addToAnnotations(volumeAnnotations)
                 .endMetadata()
               .withNewSpec()
                 .withStorageClassName(storageClass.get)
-                .withAccessModes(PVC_ACCESS_MODE)
-                .withResources(new ResourceRequirementsBuilder()
+                .withAccessModes(accessMode)
+                .withResources(new VolumeResourceRequirementsBuilder()
                   .withRequests(Map("storage" -> new Quantity(size.get)).asJava).build())
                 .endSpec()
               .build())
@@ -122,25 +136,11 @@ private[spark] class MountVolumesFeatureStep(conf: KubernetesConf)
   override def getAdditionalKubernetesResources(): Seq[HasMetadata] = {
     additionalResources.toSeq
   }
-
-  private def checkPVCClaimName(claimName: String): Unit = {
-    val executorInstances = conf.get(EXECUTOR_INSTANCES)
-    if (executorInstances.isDefined && executorInstances.get > 1) {
-      // PVC ClaimName should contain OnDemand or SPARK_EXECUTOR_ID
-      // when requiring multiple executors.
-      // Else, spark continues to try to create the executor pod.
-      if (!claimName.contains(PVC_ON_DEMAND) && !claimName.contains(ENV_EXECUTOR_ID)) {
-        throw new IllegalArgumentException(s"PVC ClaimName: $claimName " +
-          s"should contain $PVC_ON_DEMAND or $ENV_EXECUTOR_ID " +
-          "when requiring multiple executors")
-      }
-    }
-  }
 }
 
 private[spark] object MountVolumesFeatureStep {
   val PVC_ON_DEMAND = "OnDemand"
   val PVC = "PersistentVolumeClaim"
   val PVC_POSTFIX = "-pvc"
-  val PVC_ACCESS_MODE = "ReadWriteOnce"
+  val PVC_ACCESS_MODE = "ReadWriteOncePod"
 }

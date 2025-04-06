@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql.catalyst.parser
 
-import org.apache.spark.SparkFunSuite
+import org.apache.spark.{SparkException, SparkFunSuite}
 import org.apache.spark.sql.catalyst.plans.SQLHelper
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.internal.SQLConf.TimestampTypes
@@ -25,7 +25,7 @@ import org.apache.spark.sql.types._
 
 class DataTypeParserSuite extends SparkFunSuite with SQLHelper {
 
-  def parse(sql: String): DataType = CatalystSqlParser.parseDataType(sql)
+  def parse(sql: String): DataType = DataTypeParser.parseDataType(sql)
 
   def checkDataType(dataTypeString: String, expectedDataType: DataType): Unit = {
     test(s"parse ${dataTypeString.replace("\n", "")}") {
@@ -57,6 +57,9 @@ class DataTypeParserSuite extends SparkFunSuite with SQLHelper {
   checkDataType("Dec(10, 5)", DecimalType(10, 5))
   checkDataType("deC", DecimalType.USER_DEFAULT)
   checkDataType("DATE", DateType)
+  checkDataType("TimE", TimeType())
+  checkDataType("time(0)", TimeType(0))
+  checkDataType("TIME(6)", TimeType(6))
   checkDataType("timestamp", TimestampType)
   checkDataType("timestamp_ntz", TimestampNTZType)
   checkDataType("timestamp_ltz", TimestampType)
@@ -138,12 +141,12 @@ class DataTypeParserSuite extends SparkFunSuite with SQLHelper {
   test("Do not print empty parentheses for no params") {
     checkError(
       exception = intercept("unknown"),
-      errorClass = "UNSUPPORTED_DATATYPE",
+      condition = "UNSUPPORTED_DATATYPE",
       parameters = Map("typeName" -> "\"UNKNOWN\"")
     )
     checkError(
       exception = intercept("unknown(1,2,3)"),
-      errorClass = "UNSUPPORTED_DATATYPE",
+      condition = "UNSUPPORTED_DATATYPE",
       parameters = Map("typeName" -> "\"UNKNOWN(1,2,3)\"")
     )
   }
@@ -172,4 +175,19 @@ class DataTypeParserSuite extends SparkFunSuite with SQLHelper {
   // DataType parser accepts comments.
   checkDataType("Struct<x: INT, y: STRING COMMENT 'test'>",
     (new StructType).add("x", IntegerType).add("y", StringType, true, "test"))
+
+  test("unsupported precision of the time data type") {
+    checkError(
+      exception = intercept[SparkException] {
+        CatalystSqlParser.parseDataType("time(9)")
+      },
+      condition = "UNSUPPORTED_TIME_PRECISION",
+      parameters = Map("precision" -> "9"))
+    checkError(
+      exception = intercept[ParseException] {
+        CatalystSqlParser.parseDataType("time(-1)")
+      },
+      condition = "PARSE_SYNTAX_ERROR",
+      parameters = Map("error" -> "'('", "hint" -> ""))
+  }
 }

@@ -27,7 +27,8 @@ import org.apache.hadoop.fs.Path
 
 import org.apache.spark.SparkException
 import org.apache.spark.annotation.Since
-import org.apache.spark.internal.Logging
+import org.apache.spark.internal.{Logging, LogKeys, MDC}
+import org.apache.spark.internal.LogKeys.{COUNT, RANGE}
 import org.apache.spark.ml.feature._
 import org.apache.spark.ml.impl.Utils
 import org.apache.spark.ml.linalg._
@@ -44,7 +45,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
 import org.apache.spark.sql.types.{DataType, StructType}
 import org.apache.spark.storage.StorageLevel
-import org.apache.spark.util.VersionUtils
+import org.apache.spark.util._
 
 /**
  * Params for logistic regression.
@@ -502,8 +503,8 @@ class LogisticRegression @Since("1.2.0") (
       tol, fitIntercept, maxBlockSizeInMB)
 
     if (dataset.storageLevel != StorageLevel.NONE) {
-      instr.logWarning(s"Input instances will be standardized, blockified to blocks, and " +
-        s"then cached during training. Be careful of double caching!")
+      instr.logWarning("Input instances will be standardized, blockified to blocks, and " +
+        "then cached during training. Be careful of double caching!")
     }
 
     val instances = dataset.select(
@@ -530,10 +531,11 @@ class LogisticRegression @Since("1.2.0") (
     }
 
     if (numInvalid != 0) {
-      val msg = s"Classification labels should be in [0 to ${numClasses - 1}]. " +
-        s"Found $numInvalid invalid labels."
+      val msg = log"Classification labels should be in " +
+        log"${MDC(RANGE, s"[0 to ${numClasses - 1}]")}. " +
+        log"Found ${MDC(COUNT, numInvalid)} invalid labels."
       instr.logError(msg)
-      throw new SparkException(msg)
+      throw new SparkException(msg.message)
     }
 
     instr.logNumClasses(numClasses)
@@ -567,8 +569,8 @@ class LogisticRegression @Since("1.2.0") (
 
     val isConstantLabel = histogram.count(_ != 0.0) == 1
     if ($(fitIntercept) && isConstantLabel && !usingBoundConstrainedOptimization) {
-      instr.logWarning(s"All labels are the same value and fitIntercept=true, so the " +
-        s"coefficients will be zeros. Training is not needed.")
+      instr.logWarning("All labels are the same value and fitIntercept=true, so the " +
+        "coefficients will be zeros. Training is not needed.")
       val constantLabelIndex = Vectors.dense(histogram).argmax
       val coefMatrix = new SparseMatrix(numCoefficientSets, numFeatures,
         new Array[Int](numCoefficientSets + 1), Array.emptyIntArray, Array.emptyDoubleArray,
@@ -582,8 +584,8 @@ class LogisticRegression @Since("1.2.0") (
     }
 
     if (!$(fitIntercept) && isConstantLabel) {
-      instr.logWarning(s"All labels belong to a single class and fitIntercept=false. It's a " +
-        s"dangerous ground, so the algorithm may not converge.")
+      instr.logWarning("All labels belong to a single class and fitIntercept=false. It's a " +
+        "dangerous ground, so the algorithm may not converge.")
     }
 
     val featuresMean = summarizer.mean.toArray
@@ -634,9 +636,7 @@ class LogisticRegression @Since("1.2.0") (
         initialSolution.toArray, regularization, optimizer)
 
     if (allCoefficients == null) {
-      val msg = s"${optimizer.getClass.getName} failed."
-      instr.logError(msg)
-      throw new SparkException(msg)
+      MLUtils.optimizerFailed(instr, optimizer.getClass)
     }
 
     val allCoefMatrix = new DenseMatrix(numCoefficientSets, numFeaturesPlusIntercept,
@@ -672,7 +672,7 @@ class LogisticRegression @Since("1.2.0") (
       denseCoefficientMatrix.foreachActive { case (i, j, v) =>
         centers(j) += v
       }
-      centers.transform(_ / numCoefficientSets)
+      centers.mapInPlace(_ / numCoefficientSets)
       denseCoefficientMatrix.foreachActive { case (i, j, v) =>
         denseCoefficientMatrix.update(i, j, v - centers(j))
       }
@@ -847,9 +847,11 @@ class LogisticRegression @Since("1.2.0") (
           (_initialModel.interceptVector.size == numCoefficientSets) &&
           (_initialModel.getFitIntercept == $(fitIntercept))
         if (!modelIsValid) {
-          instr.logWarning(s"Initial coefficients will be ignored! Its dimensions " +
-            s"(${providedCoefs.numRows}, ${providedCoefs.numCols}) did not match the " +
-            s"expected size ($numCoefficientSets, $numFeatures)")
+          instr.logWarning(log"Initial coefficients will be ignored! Its dimensions " +
+            log"(${MDC(LogKeys.NUM_ROWS, providedCoefs.numRows)}}, " +
+            log"${MDC(LogKeys.NUM_COLUMNS, providedCoefs.numCols)}) did not match the " +
+            log"expected size (${MDC(LogKeys.NUM_COEFFICIENTS, numCoefficientSets)}, " +
+            log"${MDC(LogKeys.NUM_FEATURES, numFeatures)})")
         }
         modelIsValid
       case None => false
@@ -1036,7 +1038,23 @@ class LogisticRegression @Since("1.2.0") (
         solution(numFeatures) -= adapt
       }
     }
-    (solution, arrayBuilder.result)
+    (solution, arrayBuilder.result())
+  }
+
+  private[spark] override def estimateModelSize(dataset: Dataset[_]): Long = {
+    // TODO: get numClasses and numFeatures together from dataset
+    val numClasses = DatasetUtils.getNumClasses(dataset, $(labelCol))
+    val numFeatures = DatasetUtils.getNumFeatures(dataset, $(featuresCol))
+
+    var size = this.estimateMatadataSize
+    if (checkMultinomial(numClasses)) {
+      size += Matrices.getDenseSize(numFeatures, numClasses) // coefficientMatrix
+      size += Vectors.getDenseSize(numClasses) // interceptVector
+    } else {
+      size += Matrices.getDenseSize(numFeatures, 1) // coefficientMatrix
+      size += Vectors.getDenseSize(1) // interceptVector
+    }
+    size
   }
 
   @Since("1.4.0")
@@ -1073,6 +1091,9 @@ class LogisticRegressionModel private[spark] (
   private[spark] def this(uid: String, coefficients: Vector, intercept: Double) =
     this(uid, new DenseMatrix(1, coefficients.size, coefficients.toArray, isTransposed = true),
       Vectors.dense(intercept), 2, isMultinomial = false)
+
+  // For ml connect only
+  private[ml] def this() = this("", Matrices.empty, Vectors.empty, -1, false)
 
   /**
    * A vector of model coefficients for "binomial" logistic regression. If this model was trained
@@ -1243,6 +1264,17 @@ class LogisticRegressionModel private[spark] (
     }
   }
 
+  private[spark] override def estimatedSize: Long = {
+    var size = this.estimateMatadataSize
+    if (this.coefficientMatrix != null) {
+      size += this.coefficientMatrix.getSizeInBytes
+    }
+    if (this.interceptVector != null) {
+      size += this.interceptVector.getSizeInBytes
+    }
+    size
+  }
+
   @Since("1.4.0")
   override def copy(extra: ParamMap): LogisticRegressionModel = {
     val newModel = copyValues(new LogisticRegressionModel(uid, coefficientMatrix, interceptVector,
@@ -1308,12 +1340,12 @@ object LogisticRegressionModel extends MLReadable[LogisticRegressionModel] {
 
     override protected def saveImpl(path: String): Unit = {
       // Save metadata and Params
-      DefaultParamsWriter.saveMetadata(instance, path, sc)
+      DefaultParamsWriter.saveMetadata(instance, path, sparkSession)
       // Save model data: numClasses, numFeatures, intercept, coefficients
       val data = Data(instance.numClasses, instance.numFeatures, instance.interceptVector,
         instance.coefficientMatrix, instance.isMultinomial)
       val dataPath = new Path(path, "data").toString
-      sparkSession.createDataFrame(Seq(data)).repartition(1).write.parquet(dataPath)
+      sparkSession.createDataFrame(Seq(data)).write.parquet(dataPath)
     }
   }
 
@@ -1323,7 +1355,7 @@ object LogisticRegressionModel extends MLReadable[LogisticRegressionModel] {
     private val className = classOf[LogisticRegressionModel].getName
 
     override def load(path: String): LogisticRegressionModel = {
-      val metadata = DefaultParamsReader.loadMetadata(path, sc, className)
+      val metadata = DefaultParamsReader.loadMetadata(path, sparkSession, className)
       val (major, minor) = VersionUtils.majorMinorVersion(metadata.sparkVersion)
 
       val dataPath = new Path(path, "data").toString

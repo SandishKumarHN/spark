@@ -46,6 +46,8 @@ Spark SQL and DataFrames support the following data types:
 * Datetime type
   - `DateType`: Represents values comprising values of fields year, month and day, without a
   time-zone.
+  - `TimeType(precision)`: Represents values comprising values of fields hour, minute and second with the number of decimal digits `precision` following the decimal point in the seconds field, without a time-zone.
+  The range of values is from `00:00:00` to `23:59:59` for min precision `0`, and to `23:59:59.999999` for max precision `6`.
   - `TimestampType`: Timestamp with local time zone(TIMESTAMP_LTZ). It represents values comprising values of fields year, month, day,
   hour, minute, and second, with the session local time-zone. The timestamp value represents an
   absolute point in time.
@@ -119,14 +121,16 @@ from pyspark.sql.types import *
 
 |Data type|Value type in Python|API to access or create a data type|
 |---------|--------------------|-----------------------------------|
-|**ByteType**|int or long<br/>**Note:** Numbers will be converted to 1-byte signed integer numbers at runtime. Please make sure that numbers are within the range of -128 to 127.|ByteType()|
-|**ShortType**|int or long<br/>**Note:** Numbers will be converted to 2-byte signed integer numbers at runtime. Please make sure that numbers are within the range of -32768 to 32767.|ShortType()|
-|**IntegerType**|int or long|IntegerType()|
-|**LongType**|long<br/>**Note:** Numbers will be converted to 8-byte signed integer numbers at runtime. Please make sure that numbers are within the range of -9223372036854775808 to 9223372036854775807. Otherwise, please convert data to decimal.Decimal and use DecimalType.|LongType()|
+|**ByteType**|int<br/>**Note:** Numbers will be converted to 1-byte signed integer numbers at runtime. Please make sure that numbers are within the range of -128 to 127.|ByteType()|
+|**ShortType**|int<br/>**Note:** Numbers will be converted to 2-byte signed integer numbers at runtime. Please make sure that numbers are within the range of -32768 to 32767.|ShortType()|
+|**IntegerType**|int|IntegerType()|
+|**LongType**|int<br/>**Note:** Numbers will be converted to 8-byte signed integer numbers at runtime. Please make sure that numbers are within the range of -9223372036854775808 to 9223372036854775807. Otherwise, please convert data to decimal.Decimal and use DecimalType.|LongType()|
 |**FloatType**|float<br/>**Note:** Numbers will be converted to 4-byte single-precision floating point numbers at runtime.|FloatType()|
 |**DoubleType**|float|DoubleType()|
 |**DecimalType**|decimal.Decimal|DecimalType()|
-|**StringType**|string|StringType()|
+|**StringType**|str|StringType()|
+|**CharType(length)**|str|CharType(length)|
+|**VarcharType(length)**|str|VarcharType(length)|
 |**BinaryType**|bytearray|BinaryType()|
 |**BooleanType**|bool|BooleanType()|
 |**TimestampType**|datetime.datetime|TimestampType()|
@@ -157,11 +161,14 @@ You can access them by doing
 |**DoubleType**|Double|DoubleType|
 |**DecimalType**|java.math.BigDecimal|DecimalType|
 |**StringType**|String|StringType|
+|**CharType(length)**|String|CharType(length)|
+|**VarcharType(length)**|String|VarcharType(length)|
 |**BinaryType**|Array[Byte]|BinaryType|
 |**BooleanType**|Boolean|BooleanType|
 |**TimestampType**|java.time.Instant or java.sql.Timestamp|TimestampType|
 |**TimestampNTZType**|java.time.LocalDateTime|TimestampNTZType|
 |**DateType**|java.time.LocalDate or java.sql.Date|DateType|
+|**TimeType**|java.time.LocalTime|TimeType|
 |**YearMonthIntervalType**|java.time.Period|YearMonthIntervalType|
 |**DayTimeIntervalType**|java.time.Duration|DayTimeIntervalType|
 |**ArrayType**|scala.collection.Seq|ArrayType(*elementType*, [*containsNull]*)<br/>**Note:** The default value of *containsNull* is true.|
@@ -188,11 +195,14 @@ please use factory methods provided in
 |**DoubleType**|double or Double|DataTypes.DoubleType|
 |**DecimalType**|java.math.BigDecimal|DataTypes.createDecimalType()<br/>DataTypes.createDecimalType(*precision*, *scale*).|
 |**StringType**|String|DataTypes.StringType|
+|**CharType(length)**|String|DataTypes.createCharType(length)|
+|**VarcharType(length)**|String|DataTypes.createVarcharType(length)|
 |**BinaryType**|byte[]|DataTypes.BinaryType|
 |**BooleanType**|boolean or Boolean|DataTypes.BooleanType|
 |**TimestampType**|java.time.Instant or java.sql.Timestamp|DataTypes.TimestampType|
 |**TimestampNTZType**|java.time.LocalDateTime|DataTypes.TimestampNTZType|
 |**DateType**|java.time.LocalDate or java.sql.Date|DataTypes.DateType|
+|**TimeType**|java.time.LocalTime|DataTypes.TimeType|
 |**YearMonthIntervalType**|java.time.Period|DataTypes.YearMonthIntervalType|
 |**DayTimeIntervalType**|java.time.Duration|DataTypes.DayTimeIntervalType|
 |**ArrayType**|java.util.List|DataTypes.createArrayType(*elementType*)<br/>**Note:** The value of *containsNull* will be true.<br/>DataTypes.createArrayType(*elementType*, *containsNull*).|
@@ -242,6 +252,8 @@ The following table shows the type names as well as aliases used in Spark SQL pa
 |**TimestampType**|TIMESTAMP, TIMESTAMP_LTZ|
 |**TimestampNTZType**|TIMESTAMP_NTZ|
 |**StringType**|STRING|
+|**CharType(length)**|CHAR(length)|
+|**VarcharType(length)**|VARCHAR(length)|
 |**BinaryType**|BINARY|
 |**DecimalType**|DECIMAL, DEC, NUMERIC|
 |**YearMonthIntervalType**|INTERVAL YEAR, INTERVAL YEAR TO MONTH, INTERVAL MONTH|
@@ -353,19 +365,24 @@ SELECT double('inf') = double('infinity') AS col;
 +----+
 
 CREATE TABLE test (c1 int, c2 double);
-INSERT INTO test VALUES (1, double('infinity'));
-INSERT INTO test VALUES (2, double('infinity'));
-INSERT INTO test VALUES (3, double('inf'));
-INSERT INTO test VALUES (4, double('-inf'));
-INSERT INTO test VALUES (5, double('NaN'));
-INSERT INTO test VALUES (6, double('NaN'));
-INSERT INTO test VALUES (7, double('-infinity'));
-SELECT COUNT(*), c2 FROM test GROUP BY c2;
+INSERT INTO test VALUES
+  (1, double('infinity')),
+  (2, double('infinity')),
+  (3, double('inf')),
+  (4, double('-inf')),
+  (5, double('NaN')),
+  (6, double('NaN')),
+  (7, double('-infinity'))
+;
+SELECT COUNT(*), c2
+FROM test
+GROUP BY c2
+ORDER BY c2;
 +---------+---------+
 | count(1)|       c2|
 +---------+---------+
-|        2|      NaN|
 |        2|-Infinity|
 |        3| Infinity|
+|        2|      NaN|
 +---------+---------+
 ```

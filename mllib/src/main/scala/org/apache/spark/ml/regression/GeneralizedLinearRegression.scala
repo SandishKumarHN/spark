@@ -26,7 +26,7 @@ import org.apache.hadoop.fs.Path
 
 import org.apache.spark.SparkException
 import org.apache.spark.annotation.Since
-import org.apache.spark.internal.Logging
+import org.apache.spark.internal.{Logging, LogKeys, MDC}
 import org.apache.spark.ml.PredictorParams
 import org.apache.spark.ml.attribute._
 import org.apache.spark.ml.feature.{Instance, OffsetInstance}
@@ -445,6 +445,14 @@ class GeneralizedLinearRegression @Since("2.0.0") (@Since("2.0.0") override val 
 
   @Since("2.0.0")
   override def copy(extra: ParamMap): GeneralizedLinearRegression = defaultCopy(extra)
+
+  override def estimateModelSize(dataset: Dataset[_]): Long = {
+    val numFeatures = DatasetUtils.getNumFeatures(dataset, $(featuresCol))
+
+    var size = this.estimateMatadataSize
+    size += Vectors.getDenseSize(numFeatures) // coefficients
+    size
+  }
 }
 
 @Since("2.0.0")
@@ -1009,6 +1017,9 @@ class GeneralizedLinearRegressionModel private[ml] (
   with GeneralizedLinearRegressionBase with MLWritable
   with HasTrainingSummary[GeneralizedLinearRegressionTrainingSummary] {
 
+  // For ml connect only
+  private[ml] def this() = this("", Vectors.empty, Double.NaN)
+
   /**
    * Sets the link prediction (linear predictor) column name.
    *
@@ -1074,10 +1085,10 @@ class GeneralizedLinearRegressionModel private[ml] (
     }
 
     if (numColsOutput == 0) {
-      this.logWarning(s"$uid: GeneralizedLinearRegressionModel.transform() does nothing" +
-        " because no output columns were set.")
+      this.logWarning(log"${MDC(LogKeys.UUID, uid)}: GeneralizedLinearRegressionModel.transform()" +
+        log" does nothing because no output columns were set.")
     }
-    outputData.toDF
+    outputData.toDF()
   }
 
   /**
@@ -1100,6 +1111,14 @@ class GeneralizedLinearRegressionModel private[ml] (
     val copied = copyValues(new GeneralizedLinearRegressionModel(uid, coefficients, intercept),
       extra)
     copied.setSummary(trainingSummary).setParent(parent)
+  }
+
+  private[spark] override def estimatedSize: Long = {
+    var size = this.estimateMatadataSize
+    if (this.coefficients != null) {
+      size += this.coefficients.getSizeInBytes
+    }
+    size
   }
 
   /**
@@ -1141,11 +1160,11 @@ object GeneralizedLinearRegressionModel extends MLReadable[GeneralizedLinearRegr
 
     override protected def saveImpl(path: String): Unit = {
       // Save metadata and Params
-      DefaultParamsWriter.saveMetadata(instance, path, sc)
+      DefaultParamsWriter.saveMetadata(instance, path, sparkSession)
       // Save model data: intercept, coefficients
       val data = Data(instance.intercept, instance.coefficients)
       val dataPath = new Path(path, "data").toString
-      sparkSession.createDataFrame(Seq(data)).repartition(1).write.parquet(dataPath)
+      sparkSession.createDataFrame(Seq(data)).write.parquet(dataPath)
     }
   }
 
@@ -1156,7 +1175,7 @@ object GeneralizedLinearRegressionModel extends MLReadable[GeneralizedLinearRegr
     private val className = classOf[GeneralizedLinearRegressionModel].getName
 
     override def load(path: String): GeneralizedLinearRegressionModel = {
-      val metadata = DefaultParamsReader.loadMetadata(path, sc, className)
+      val metadata = DefaultParamsReader.loadMetadata(path, sparkSession, className)
 
       val dataPath = new Path(path, "data").toString
       val data = sparkSession.read.parquet(dataPath)
@@ -1182,7 +1201,7 @@ object GeneralizedLinearRegressionModel extends MLReadable[GeneralizedLinearRegr
 @Since("2.0.0")
 class GeneralizedLinearRegressionSummary private[regression] (
     dataset: Dataset[_],
-    origModel: GeneralizedLinearRegressionModel) extends Serializable {
+    origModel: GeneralizedLinearRegressionModel) extends Summary with Serializable {
 
   import GeneralizedLinearRegression._
 
@@ -1418,7 +1437,7 @@ class GeneralizedLinearRegressionSummary private[regression] (
         case Row(label: Double, pred: Double, weight: Double) =>
           (label, pred, weight)
     }
-    family.aic(t, deviance, numInstances, weightSum) + 2 * rank
+    family.aic(t, deviance, numInstances.toDouble, weightSum) + 2 * rank
   }
 }
 

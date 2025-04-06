@@ -124,6 +124,7 @@ Created Time [not included in comparison]
 Last Access [not included in comparison]
 Created By [not included in comparison]
 Type: VIEW
+View Schema Mode: BINDING
 Schema: root
  |-- e: integer (nullable = true)
 
@@ -208,13 +209,20 @@ SHOW TABLE EXTENDED LIKE 'show_t*' PARTITION(c='Us', d=1)
 -- !query schema
 struct<>
 -- !query output
-org.apache.spark.sql.catalyst.analysis.NoSuchTableException
+org.apache.spark.sql.catalyst.ExtendedAnalysisException
 {
   "errorClass" : "TABLE_OR_VIEW_NOT_FOUND",
   "sqlState" : "42P01",
   "messageParameters" : {
-    "relationName" : "`showdb`.`show_t*`"
-  }
+    "relationName" : "`show_t*`"
+  },
+  "queryContext" : [ {
+    "objectType" : "",
+    "objectName" : "",
+    "startIndex" : 26,
+    "stopIndex" : 34,
+    "fragment" : "'show_t*'"
+  } ]
 }
 
 
@@ -241,10 +249,11 @@ struct<>
 -- !query output
 org.apache.spark.sql.AnalysisException
 {
-  "errorClass" : "_LEGACY_ERROR_TEMP_1231",
+  "errorClass" : "PARTITIONS_NOT_FOUND",
+  "sqlState" : "428FT",
   "messageParameters" : {
-    "key" : "a",
-    "tblName" : "`spark_catalog`.`showdb`.`show_t1`"
+    "partitionList" : "`a`",
+    "tableName" : "`spark_catalog`.`showdb`.`show_t1`"
   }
 }
 

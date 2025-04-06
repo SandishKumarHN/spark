@@ -26,8 +26,12 @@ import org.apache.spark.sql.catalyst.analysis.TypeCheckResult.{DataTypeMismatch,
 import org.apache.spark.sql.catalyst.dsl.expressions._
 import org.apache.spark.sql.catalyst.expressions.Cast._
 import org.apache.spark.sql.catalyst.expressions.codegen.GenerateUnsafeProjection
+import org.apache.spark.sql.catalyst.util.CharsetProvider
+import org.apache.spark.sql.errors.QueryExecutionErrors.toSQLId
 import org.apache.spark.sql.internal.SQLConf
+import org.apache.spark.sql.internal.types.StringTypeWithCollation
 import org.apache.spark.sql.types._
+import org.apache.spark.unsafe.types.UTF8String
 
 class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
 
@@ -69,7 +73,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
       DataTypeMismatch(
         errorSubClass = "UNEXPECTED_INPUT_TYPE",
         messageParameters = Map(
-          "paramIndex" -> "1",
+          "paramIndex" -> ordinalNumber(0),
           "requiredType" -> "(\"STRING\" or \"BINARY\" or \"ARRAY\")",
           "inputSql" -> "\"1\"",
           "inputType" -> "\"INT\""
@@ -154,7 +158,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
       exception = intercept[AnalysisException] {
         Elt(Seq.empty).checkInputDataTypes()
       },
-      errorClass = "WRONG_NUM_ARGS.WITHOUT_SUGGESTION",
+      condition = "WRONG_NUM_ARGS.WITHOUT_SUGGESTION",
       parameters = Map(
         "functionName" -> "`elt`",
         "expectedNum" -> "> 1",
@@ -165,7 +169,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
       exception = intercept[AnalysisException] {
         Elt(Seq(Literal(1))).checkInputDataTypes()
       },
-      errorClass = "WRONG_NUM_ARGS.WITHOUT_SUGGESTION",
+      condition = "WRONG_NUM_ARGS.WITHOUT_SUGGESTION",
       parameters = Map(
         "functionName" -> "`elt`",
         "expectedNum" -> "> 1",
@@ -177,7 +181,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
       DataTypeMismatch(
         errorSubClass = "UNEXPECTED_INPUT_TYPE",
         messageParameters = Map(
-          "paramIndex" -> "2...",
+          "paramIndex" -> (ordinalNumber(1) + "..."),
           "requiredType" -> "\"STRING\" or \"BINARY\"",
           "inputSql" -> "\"2\"",
           "inputType" -> "\"INT\""
@@ -355,6 +359,8 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
     // scalastyle:on
     checkEvaluation(
       SubstringIndex(Literal("www||apache||org"), Literal( "||"), Literal(2)), "www||apache")
+    checkEvaluation(SubstringIndex(
+      Literal("www.apache.org"), Literal("."), Literal.create(null, IntegerType)), null)
   }
 
   test("SPARK-40213: ascii for Latin-1 Supplement characters") {
@@ -464,11 +470,20 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
     val b = $"b".binary.at(0)
     val bytes = Array[Byte](1, 2, 3, 4)
 
+    assert(!Base64(Literal(bytes)).nullable)
+    assert(Base64(Literal.create(null, BinaryType)).nullable)
+    assert(Base64(Literal(bytes).castNullable()).nullable)
+    assert(!UnBase64(Literal("AQIDBA==")).nullable)
+    assert(UnBase64(Literal.create(null, StringType)).nullable)
+    assert(UnBase64(Literal("AQIDBA==").castNullable()).nullable)
+
     checkEvaluation(Base64(Literal(bytes)), "AQIDBA==", create_row("abdef"))
     checkEvaluation(Base64(UnBase64(Literal("AQIDBA=="))), "AQIDBA==", create_row("abdef"))
     checkEvaluation(Base64(UnBase64(Literal(""))), "", create_row("abdef"))
     checkEvaluation(Base64(UnBase64(Literal.create(null, StringType))), null, create_row("abdef"))
-    checkEvaluation(Base64(UnBase64(a)), "AQIDBA==", create_row("AQIDBA=="))
+
+    // failOnError
+    checkEvaluation(Base64(UnBase64(a, true)), "AQIDBA==", create_row("AQIDBA=="))
 
     checkEvaluation(Base64(b), "AQIDBA==", create_row(bytes))
     checkEvaluation(Base64(b), "", create_row(Array.empty[Byte]))
@@ -487,6 +502,8 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
     checkEvaluation(
       StringDecode(Encode(Literal("大千世界"), Literal("UTF-16LE")), Literal("UTF-16LE")), "大千世界")
     checkEvaluation(
+      StringDecode(Encode(Literal("大千世界"), Literal("UTF-32")), Literal("UTF-32")), "大千世界")
+    checkEvaluation(
       StringDecode(Encode(a, Literal("utf-8")), Literal("utf-8")), "大千世界", create_row("大千世界"))
     checkEvaluation(
       StringDecode(Encode(a, Literal("utf-8")), Literal("utf-8")), "", create_row(""))
@@ -500,8 +517,25 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
     checkEvaluation(StringDecode(b, Literal.create(null, StringType)), null, create_row(null))
 
     // Test escaping of charset
-    GenerateUnsafeProjection.generate(Encode(a, Literal("\"quote")) :: Nil)
-    GenerateUnsafeProjection.generate(StringDecode(b, Literal("\"quote")) :: Nil)
+    GenerateUnsafeProjection.generate(Encode(a, Literal("\"quote")).replacement :: Nil)
+    GenerateUnsafeProjection.generate(StringDecode(b, Literal("\"quote")).replacement :: Nil)
+  }
+
+  test("SPARK-47307: base64 encoding without chunking") {
+    val longString = "a" * 58
+    val encoded = "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQ=="
+    withSQLConf(SQLConf.CHUNK_BASE64_STRING_ENABLED.key -> "false") {
+      checkEvaluation(Base64(Literal(longString.getBytes)), encoded)
+    }
+    val chunkEncoded =
+      s"YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh\r\nYQ=="
+    withSQLConf(SQLConf.CHUNK_BASE64_STRING_ENABLED.key -> "true") {
+      checkEvaluation(Base64(Literal(longString.getBytes)), chunkEncoded)
+    }
+
+    // check if unbase64 works well for chunked and non-chunked encoded strings
+    checkEvaluation(StringDecode(UnBase64(Literal(encoded)), Literal("utf-8")), longString)
+    checkEvaluation(StringDecode(UnBase64(Literal(chunkEncoded)), Literal("utf-8")), longString)
   }
 
   test("initcap unit test") {
@@ -516,6 +550,95 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
     // scalastyle:on
   }
 
+  test("Levenshtein distance threshold") {
+    checkEvaluation(Levenshtein(Literal("kitten"), Literal("sitting"), Some(Literal(2))), -1)
+
+    checkEvaluation(Levenshtein(Literal(""), Literal(""), Some(Literal(0))), 0)
+    checkEvaluation(Levenshtein(Literal("aaapppp"), Literal(""), Some(Literal(8))), 7)
+    checkEvaluation(Levenshtein(Literal("aaapppp"), Literal(""), Some(Literal(7))), 7)
+    checkEvaluation(Levenshtein(Literal("aaapppp"), Literal(""), Some(Literal(6))), -1)
+
+    checkEvaluation(Levenshtein(Literal("elephant"), Literal("hippo"), Some(Literal(7))), 7)
+    checkEvaluation(Levenshtein(Literal("elephant"), Literal("hippo"), Some(Literal(6))), -1)
+    checkEvaluation(Levenshtein(Literal("hippo"), Literal("elephant"), Some(Literal(7))), 7)
+    checkEvaluation(Levenshtein(Literal("hippo"), Literal("elephant"), Some(Literal(6))), -1)
+
+    // empty strings
+    checkEvaluation(Levenshtein(Literal(""), Literal(""), Some(Literal(0))), 0)
+    checkEvaluation(Levenshtein(Literal("aaapppp"), Literal(""), Some(Literal(8))), 7)
+    checkEvaluation(Levenshtein(Literal("aaapppp"), Literal(""), Some(Literal(7))), 7)
+    checkEvaluation(Levenshtein(Literal("aaapppp"), Literal(""), Some(Literal(6))), -1)
+
+    // unequal strings, zero threshold
+    checkEvaluation(Levenshtein(Literal("b"), Literal("a"), Some(Literal(0))), -1)
+    checkEvaluation(Levenshtein(Literal("a"), Literal("b"), Some(Literal(0))), -1)
+
+    // equal strings
+    checkEvaluation(Levenshtein(Literal("aa"), Literal("aa"), Some(Literal(0))), 0)
+    checkEvaluation(Levenshtein(Literal("aa"), Literal("aa"), Some(Literal(2))), 0)
+
+    // same length
+    checkEvaluation(Levenshtein(Literal("aaa"), Literal("bbb"), Some(Literal(2))), -1)
+    checkEvaluation(Levenshtein(Literal("aaa"), Literal("bbb"), Some(Literal(3))), 3)
+
+    // big stripe
+    checkEvaluation(Levenshtein(Literal("aaaaaa"), Literal("b"), Some(Literal(10))), 6)
+
+    // distance less than threshold
+    checkEvaluation(Levenshtein(Literal("aaapppp"), Literal("b"), Some(Literal(8))), 7)
+    checkEvaluation(Levenshtein(Literal("a"), Literal("bbb"), Some(Literal(4))), 3)
+
+    // distance equal to threshold
+    checkEvaluation(Levenshtein(Literal("aaapppp"), Literal("b"), Some(Literal(7))), 7)
+    checkEvaluation(Levenshtein(Literal("a"), Literal("bbb"), Some(Literal(3))), 3)
+
+    // distance greater than threshold
+    checkEvaluation(Levenshtein(Literal("a"), Literal("bbb"), Some(Literal(2))), -1)
+    checkEvaluation(Levenshtein(Literal("bbb"), Literal("a"), Some(Literal(2))), -1)
+    checkEvaluation(Levenshtein(Literal("aaapppp"), Literal("b"), Some(Literal(6))), -1)
+
+    // stripe runs off array, strings not similar
+    checkEvaluation(Levenshtein(Literal("a"), Literal("bbb"), Some(Literal(1))), -1)
+    checkEvaluation(Levenshtein(Literal("bbb"), Literal("a"), Some(Literal(1))), -1)
+
+    // stripe runs off array, strings are similar
+    checkEvaluation(Levenshtein(Literal("12345"), Literal("1234567"), Some(Literal(1))), -1)
+    checkEvaluation(Levenshtein(Literal("1234567"), Literal("12345"), Some(Literal(1))), -1)
+
+    // old getLevenshteinDistance test cases
+    checkEvaluation(Levenshtein(Literal("frog"), Literal("fog"), Some(Literal(1))), 1)
+    checkEvaluation(Levenshtein(Literal("fly"), Literal("ant"), Some(Literal(3))), 3)
+    checkEvaluation(Levenshtein(Literal("elephant"), Literal("hippo"), Some(Literal(7))), 7)
+    checkEvaluation(Levenshtein(Literal("elephant"), Literal("hippo"), Some(Literal(6))), -1)
+    checkEvaluation(Levenshtein(Literal("hippo"), Literal("elephant"), Some(Literal(7))), 7)
+    checkEvaluation(Levenshtein(Literal("hippo"), Literal("elephant"), Some(Literal(6))), -1)
+    checkEvaluation(Levenshtein(Literal("hippo"), Literal("zzzzzzzz"), Some(Literal(8))), 8)
+    checkEvaluation(Levenshtein(Literal("zzzzzzzz"), Literal("hippo"), Some(Literal(8))), 8)
+    checkEvaluation(Levenshtein(Literal("hello"), Literal("hallo"), Some(Literal(1))), 1)
+
+    checkEvaluation(Levenshtein(Literal("frog"), Literal("fog"),
+      Some(Literal(Integer.MAX_VALUE))), 1)
+    checkEvaluation(Levenshtein(Literal("fly"), Literal("ant"),
+      Some(Literal(Integer.MAX_VALUE))), 3)
+    checkEvaluation(Levenshtein(Literal("elephant"), Literal("hippo"),
+      Some(Literal(Integer.MAX_VALUE))), 7)
+    checkEvaluation(Levenshtein(Literal("hippo"), Literal("elephant"),
+      Some(Literal(Integer.MAX_VALUE))), 7)
+    checkEvaluation(Levenshtein(Literal("hippo"), Literal("zzzzzzzz"),
+      Some(Literal(Integer.MAX_VALUE))), 8)
+    checkEvaluation(Levenshtein(Literal("zzzzzzzz"), Literal("hippo"),
+      Some(Literal(Integer.MAX_VALUE))), 8)
+    checkEvaluation(Levenshtein(Literal("hello"), Literal("hallo"),
+      Some(Literal(Integer.MAX_VALUE))), 1)
+    checkEvaluation(Levenshtein(Literal("abc"), Literal("acb"),
+      Some(Literal(1))), -1)
+
+    // scalastyle:off
+    // non ascii characters are not allowed in the code, so we disable the scalastyle here.
+    checkEvaluation(Levenshtein(Literal("千世"), Literal("fog"), Some(Literal(3))), 3)
+    checkEvaluation(Levenshtein(Literal("世界千世"), Literal("大a界b"), Some(Literal(4))), 4)
+    // scalastyle:on
+  }
 
   test("Levenshtein distance") {
     checkEvaluation(Levenshtein(Literal.create(null, StringType), Literal("")), null)
@@ -674,7 +797,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
       DataTypeMismatch(
         errorSubClass = "UNEXPECTED_INPUT_TYPE",
         messageParameters = Map(
-          "paramIndex" -> "1",
+          "paramIndex" -> ordinalNumber(0),
           "requiredType" -> "(\"STRING\" or \"BINARY\")",
           "inputSql" -> "\"1\"",
           "inputType" -> "\"INT\""
@@ -686,7 +809,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
       DataTypeMismatch(
         errorSubClass = "UNEXPECTED_INPUT_TYPE",
         messageParameters = Map(
-          "paramIndex" -> "2",
+          "paramIndex" -> ordinalNumber(1),
           "requiredType" -> "(\"STRING\" or \"BINARY\")",
           "inputSql" -> "\"2\"",
           "inputType" -> "\"INT\""
@@ -1320,7 +1443,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
       DataTypeMismatch(
         errorSubClass = "NON_FOLDABLE_INPUT",
         messageParameters = Map(
-          "inputName" -> "`attributereference`",
+          "inputName" -> toSQLId("attributereference"),
           "inputType" -> toSQLType(right.dataType),
           "inputExpr" -> toSQLExpr(right)
         )
@@ -1342,8 +1465,8 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
       DataTypeMismatch(
         errorSubClass = "NON_FOLDABLE_INPUT",
         messageParameters = Map(
-          "inputName" -> "fmt",
-          "inputType" -> toSQLType(wrongFmt.dataType),
+          "inputName" -> toSQLId("fmt"),
+          "inputType" -> toSQLType(StringTypeWithCollation),
           "inputExpr" -> toSQLExpr(wrongFmt)
         )
       )
@@ -1383,8 +1506,13 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
       val toNumberExpr = ToNumber(Literal(str), Literal(format))
       assert(toNumberExpr.checkInputDataTypes() == TypeCheckResult.TypeCheckSuccess)
 
-      checkExceptionInExpression[SparkIllegalArgumentException](
-        toNumberExpr, "does not match the given number format")
+      checkErrorInExpression[SparkIllegalArgumentException](
+        toNumberExpr,
+        condition = "INVALID_FORMAT.MISMATCH_INPUT",
+        parameters = Map(
+          "inputType" -> "\"STRING\"",
+          "input" -> str,
+          "format" -> format))
 
       val tryToNumberExpr = TryToNumber(Literal(str), Literal(format))
       assert(tryToNumberExpr.checkInputDataTypes() == TypeCheckResult.TypeCheckSuccess)
@@ -1399,7 +1527,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
       DataTypeMismatch(
         errorSubClass = "NON_FOLDABLE_INPUT",
         messageParameters = Map(
-          "inputName" -> "`attributereference`",
+          "inputName" -> toSQLId("attributereference"),
           "inputType" -> toSQLType(right.dataType),
           "inputExpr" -> toSQLExpr(right)
         )
@@ -1443,7 +1571,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
         "00000") ->
         "00454"
     ).foreach { case ((decimal, format), expected) =>
-      var expr: Expression = ToCharacter(Literal(decimal), Literal(format))
+      val expr: Expression = ToCharacter(Literal(decimal), Literal(format))
       assert(expr.checkInputDataTypes() == TypeCheckResult.TypeCheckSuccess)
       checkEvaluation(expr, expected)
     }
@@ -1503,7 +1631,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
         "99999.") ->
         " 4542 "
     ).foreach { case ((decimal, format), expected) =>
-      var expr: Expression = ToCharacter(Literal(decimal), Literal(format))
+      val expr: Expression = ToCharacter(Literal(decimal), Literal(format))
       assert(expr.checkInputDataTypes() == TypeCheckResult.TypeCheckSuccess)
       checkEvaluation(expr, expected)
     }
@@ -1586,7 +1714,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
         "999,999") ->
         " 12,454"
     ).foreach { case ((decimal, format), expected) =>
-      var expr: Expression = ToCharacter(Literal(decimal), Literal(format))
+      val expr: Expression = ToCharacter(Literal(decimal), Literal(format))
       assert(expr.checkInputDataTypes() == TypeCheckResult.TypeCheckSuccess)
       checkEvaluation(expr, expected)
     }
@@ -1600,7 +1728,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
         "$00.00") ->
         "$78.12"
     ).foreach { case ((decimal, format), expected) =>
-      var expr: Expression = ToCharacter(Literal(decimal), Literal(format))
+      val expr: Expression = ToCharacter(Literal(decimal), Literal(format))
       assert(expr.checkInputDataTypes() == TypeCheckResult.TypeCheckSuccess)
       checkEvaluation(expr, expected)
     }
@@ -1635,7 +1763,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
         "99999999999.9999999S") ->
         "   83028485.0000000-"
     ).foreach { case ((decimal, format), expected) =>
-      var expr: Expression = ToCharacter(Literal(decimal), Literal(format))
+      val expr: Expression = ToCharacter(Literal(decimal), Literal(format))
       assert(expr.checkInputDataTypes() == TypeCheckResult.TypeCheckSuccess)
       checkEvaluation(expr, expected)
     }
@@ -1667,7 +1795,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
         "MI9999999999999999.999999999999999") ->
         "               -4.310000000000000"
     ).foreach { case ((decimal, format), expected) =>
-      var expr: Expression = ToCharacter(Literal(decimal), Literal(format))
+      val expr: Expression = ToCharacter(Literal(decimal), Literal(format))
       assert(expr.checkInputDataTypes() == TypeCheckResult.TypeCheckSuccess)
       checkEvaluation(expr, expected)
     }
@@ -1702,7 +1830,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
         "99G999D9PR") ->
         "<12,454.8>"
     ).foreach { case ((decimal, format), expected) =>
-      var expr: Expression = ToCharacter(Literal(decimal), Literal(format))
+      val expr: Expression = ToCharacter(Literal(decimal), Literal(format))
       assert(expr.checkInputDataTypes() == TypeCheckResult.TypeCheckSuccess)
       checkEvaluation(expr, expected)
     }
@@ -1724,7 +1852,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
         "99.9") ->
         "##.#"
     ).foreach { case ((decimal, format), expected) =>
-      var expr: Expression = ToCharacter(Literal(decimal), Literal(format))
+      val expr: Expression = ToCharacter(Literal(decimal), Literal(format))
       assert(expr.checkInputDataTypes() == TypeCheckResult.TypeCheckSuccess)
       checkEvaluation(expr, expected)
     }
@@ -1777,7 +1905,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
     // exceptional cases
     intercept[java.util.regex.PatternSyntaxException] {
       evaluateWithoutCodegen(ParseUrl(Seq(Literal("http://spark.apache.org/path?"),
-        Literal("QUERY"), Literal("???"))))
+        Literal("QUERY"), Literal("???"))).replacement)
     }
 
     // arguments checking
@@ -1785,7 +1913,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
       exception = intercept[AnalysisException] {
         ParseUrl(Seq(Literal("1"))).checkInputDataTypes()
       },
-      errorClass = "WRONG_NUM_ARGS.WITHOUT_SUGGESTION",
+      condition = "WRONG_NUM_ARGS.WITHOUT_SUGGESTION",
       parameters = Map(
         "functionName" -> "`parse_url`",
         "expectedNum" -> "[2, 3]",
@@ -1797,7 +1925,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
         ParseUrl(Seq(Literal("1"), Literal("2"), Literal("3"),
           Literal("4"))).checkInputDataTypes()
       },
-      errorClass = "WRONG_NUM_ARGS.WITHOUT_SUGGESTION",
+      condition = "WRONG_NUM_ARGS.WITHOUT_SUGGESTION",
       parameters = Map(
         "functionName" -> "`parse_url`",
         "expectedNum" -> "[2, 3]",
@@ -1807,14 +1935,14 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
     assert(ParseUrl(Seq(Literal("1"), Literal(2))).checkInputDataTypes() == DataTypeMismatch(
       errorSubClass = "UNEXPECTED_INPUT_TYPE",
       messageParameters = Map(
-        "paramIndex" -> "2",
+        "paramIndex" -> ordinalNumber(1),
         "requiredType" -> "\"STRING\"",
         "inputSql" -> "\"2\"",
         "inputType" -> "\"INT\"")))
     assert(ParseUrl(Seq(Literal(1), Literal("2"))).checkInputDataTypes() == DataTypeMismatch(
       errorSubClass = "UNEXPECTED_INPUT_TYPE",
       messageParameters = Map(
-        "paramIndex" -> "1",
+        "paramIndex" -> ordinalNumber(0),
         "requiredType" -> "\"STRING\"",
         "inputSql" -> "\"1\"",
         "inputType" -> "\"INT\"")))
@@ -1822,13 +1950,14 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
       Literal(3))).checkInputDataTypes() == DataTypeMismatch(
       errorSubClass = "UNEXPECTED_INPUT_TYPE",
       messageParameters = Map(
-        "paramIndex" -> "3",
+        "paramIndex" -> ordinalNumber(2),
         "requiredType" -> "\"STRING\"",
         "inputSql" -> "\"3\"",
         "inputType" -> "\"INT\"")))
 
     // Test escaping of arguments
-    GenerateUnsafeProjection.generate(ParseUrl(Seq(Literal("\"quote"), Literal("\"quote"))) :: Nil)
+    GenerateUnsafeProjection.generate(
+      ParseUrl(Seq(Literal("\"quote"), Literal("\"quote"))).replacement :: Nil)
   }
 
   test("SPARK-33468: ParseUrl in ANSI mode should fail if input string is not a valid url") {
@@ -1862,7 +1991,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
 
     // Test escaping of arguments
     GenerateUnsafeProjection.generate(
-      Sentences(Literal("\"quote"), Literal("\"quote"), Literal("\"quote")) :: Nil)
+      Sentences(Literal("\"quote"), Literal("\"quote"), Literal("\"quote")).replacement :: Nil)
   }
 
   test("SPARK-33386: elt ArrayIndexOutOfBoundsException") {
@@ -1912,7 +2041,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
       exception = intercept[AnalysisException] {
         expr1.checkInputDataTypes()
       },
-      errorClass = "WRONG_NUM_ARGS.WITHOUT_SUGGESTION",
+      condition = "WRONG_NUM_ARGS.WITHOUT_SUGGESTION",
       parameters = Map(
         "functionName" -> "`elt`",
         "expectedNum" -> "> 1",
@@ -1927,7 +2056,7 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
       DataTypeMismatch(
         errorSubClass = "UNEXPECTED_INPUT_TYPE",
         messageParameters = Map(
-          "paramIndex" -> "1",
+          "paramIndex" -> ordinalNumber(0),
           "requiredType" -> toSQLType(IntegerType),
           "inputSql" -> toSQLExpr(indexExpr2),
           "inputType" -> toSQLType(indexExpr2.dataType)
@@ -1943,12 +2072,30 @@ class StringExpressionsSuite extends SparkFunSuite with ExpressionEvalHelper {
       DataTypeMismatch(
         errorSubClass = "UNEXPECTED_INPUT_TYPE",
         messageParameters = Map(
-          "paramIndex" -> "2...",
+          "paramIndex" -> (ordinalNumber(1) + "..."),
           "requiredType" -> (toSQLType(StringType) + " or " + toSQLType(BinaryType)),
           "inputSql" -> inputExpr3.map(toSQLExpr(_)).mkString(","),
           "inputType" -> inputExpr3.map(expr => toSQLType(expr.dataType)).mkString(",")
         )
       )
     )
+  }
+
+  test("SPARK-48712: Check whether input is valid utf-8 string or not before entering fast path") {
+    val str = UTF8String.fromBytes(Array[Byte](-1, -2, -3, -4))
+    assert(!str.isValid, "please use a string that is not valid UTF-8 for testing")
+    val expected = Array[Byte](-17, -65, -67, -17, -65, -67, -17, -65, -67, -17, -65, -67)
+    val bytes = Encode.encode(str, UTF8String.fromString("UTF-8"), false, false)
+    assert(bytes === expected)
+    checkEvaluation(Encode(Literal(str), Literal("UTF-8")), expected)
+    checkEvaluation(Encode(Literal(UTF8String.EMPTY_UTF8), Literal("UTF-8")), Array.emptyByteArray)
+    checkErrorInExpression[SparkIllegalArgumentException](
+      Encode(Literal(UTF8String.EMPTY_UTF8), Literal("UTF-12345")),
+      condition = "INVALID_PARAMETER_VALUE.CHARSET",
+      parameters = Map(
+        "charset" -> "UTF-12345",
+        "functionName" -> toSQLId("encode"),
+        "parameter" -> toSQLId("charset"),
+        "charsets" -> CharsetProvider.VALID_CHARSETS.mkString(", ")))
   }
 }

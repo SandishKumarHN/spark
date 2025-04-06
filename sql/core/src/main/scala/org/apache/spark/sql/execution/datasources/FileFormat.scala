@@ -23,10 +23,11 @@ import org.apache.hadoop.io.compress.{CompressionCodecFactory, SplittableCompres
 import org.apache.hadoop.mapreduce.Job
 
 import org.apache.spark.paths.SparkPath
-import org.apache.spark.sql._
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen.GenerateUnsafeProjection
+import org.apache.spark.sql.catalyst.types.DataTypeUtils.toAttributes
 import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.sources.Filter
@@ -137,7 +138,7 @@ trait FileFormat {
       sparkSession, dataSchema, partitionSchema, requiredSchema, filters, options, hadoopConf)
 
     new (PartitionedFile => Iterator[InternalRow]) with Serializable {
-      private val fullSchema = requiredSchema.toAttributes ++ partitionSchema.toAttributes
+      private val fullSchema = toAttributes(requiredSchema) ++ toAttributes(partitionSchema)
 
       // Using lazy val to avoid serialization
       private lazy val appendPartitionColumns =
@@ -182,10 +183,22 @@ trait FileFormat {
   def supportDataType(dataType: DataType): Boolean = true
 
   /**
+   * Returns whether this format supports the given [[DataType]] in the read-only path.
+   * By default, it is the same as `supportDataType`. In certain file formats, it can allow more
+   * data types than `supportDataType`. At this point, only `CSVFileFormat` overrides it.
+   */
+  def supportReadDataType(dataType: DataType): Boolean = supportDataType(dataType)
+
+  /**
    * Returns whether this format supports the given filed name in read/write path.
    * By default all field name is supported.
    */
   def supportFieldName(name: String): Boolean = true
+
+  /**
+   * Returns whether this format allows duplicated column names in the input query during writing.
+   */
+  def allowDuplicatedColumnNames: Boolean = false
 
   /**
    * All fields the file format's _metadata struct defines.
@@ -265,8 +278,13 @@ object FileFormat {
    * fields of the [[PartitionedFile]], and do have entries in the file's metadata map.
    */
   val BASE_METADATA_EXTRACTORS: Map[String, PartitionedFile => Any] = Map(
-    FILE_PATH -> { pf: PartitionedFile => pf.toPath.toString },
-    FILE_NAME -> { pf: PartitionedFile => pf.toPath.getName },
+    FILE_PATH -> { pf: PartitionedFile =>
+      // Use `new Path(Path.toString)` as a form of canonicalization
+      new Path(pf.filePath.toPath.toString).toUri.toString
+    },
+    FILE_NAME -> { pf: PartitionedFile =>
+      pf.filePath.toUri.getRawPath.split("/").lastOption.getOrElse("")
+    },
     FILE_SIZE -> { pf: PartitionedFile => pf.fileSize },
     FILE_BLOCK_START -> { pf: PartitionedFile => pf.start },
     FILE_BLOCK_LENGTH -> { pf: PartitionedFile => pf.length },
@@ -287,9 +305,9 @@ object FileFormat {
       name: String,
       file: PartitionedFile,
       metadataExtractors: Map[String, PartitionedFile => Any]): Literal = {
-    val extractor = metadataExtractors.get(name).getOrElse {
-      pf: PartitionedFile => pf.otherConstantMetadataColumnValues.get(name).orNull
-    }
+    val extractor = metadataExtractors.getOrElse(name,
+      { pf: PartitionedFile => pf.otherConstantMetadataColumnValues.get(name).orNull }
+    )
     Literal(extractor.apply(file))
   }
 
@@ -304,7 +322,8 @@ object FileFormat {
     // fields whose values can be derived from a file status. In particular, we don't have accurate
     // file split information yet, nor do we have a way to provide custom metadata column values.
     val validFieldNames = Set(FILE_PATH, FILE_NAME, FILE_SIZE, FILE_MODIFICATION_TIME)
-    val extractors = FileFormat.BASE_METADATA_EXTRACTORS.filterKeys(validFieldNames.contains).toMap
+    val extractors =
+      FileFormat.BASE_METADATA_EXTRACTORS.filter { case (k, _) => validFieldNames.contains(k) }
     assert(fieldNames.forall(validFieldNames.contains))
     val pf = PartitionedFile(
       partitionValues = partitionValues,

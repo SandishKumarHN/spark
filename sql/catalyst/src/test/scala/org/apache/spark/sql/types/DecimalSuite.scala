@@ -20,6 +20,7 @@ package org.apache.spark.sql.types
 import org.scalatest.PrivateMethodTester
 
 import org.apache.spark.{SparkArithmeticException, SparkException, SparkFunSuite, SparkNumberFormatException}
+import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.plans.SQLHelper
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.Decimal._
@@ -65,7 +66,7 @@ class DecimalSuite extends SparkFunSuite with PrivateMethodTester with SQLHelper
 
     checkError(
       exception = intercept[SparkArithmeticException](Decimal(170L, 2, 1)),
-      errorClass = "NUMERIC_VALUE_OUT_OF_RANGE",
+      condition = "NUMERIC_VALUE_OUT_OF_RANGE.WITH_SUGGESTION",
       parameters = Map(
         "value" -> "0",
         "precision" -> "2",
@@ -73,7 +74,7 @@ class DecimalSuite extends SparkFunSuite with PrivateMethodTester with SQLHelper
         "config" -> "\"spark.sql.ansi.enabled\""))
     checkError(
       exception = intercept[SparkArithmeticException](Decimal(170L, 2, 0)),
-      errorClass = "NUMERIC_VALUE_OUT_OF_RANGE",
+      condition = "NUMERIC_VALUE_OUT_OF_RANGE.WITH_SUGGESTION",
       parameters = Map(
         "value" -> "0",
         "precision" -> "2",
@@ -81,20 +82,35 @@ class DecimalSuite extends SparkFunSuite with PrivateMethodTester with SQLHelper
         "config" -> "\"spark.sql.ansi.enabled\""))
     checkError(
       exception = intercept[SparkArithmeticException](Decimal(BigDecimal("10.030"), 2, 1)),
-      errorClass = "DECIMAL_PRECISION_EXCEEDS_MAX_PRECISION",
-      parameters = Map("precision" -> "3", "maxPrecision" -> "2"))
+      condition = "NUMERIC_VALUE_OUT_OF_RANGE.WITHOUT_SUGGESTION",
+      parameters = Map(
+        "roundedValue" -> "10.0",
+        "originalValue" -> "10.030",
+        "precision" -> "2",
+        "scale" -> "1"))
     checkError(
       exception = intercept[SparkArithmeticException](Decimal(BigDecimal("-9.95"), 2, 1)),
-      errorClass = "DECIMAL_PRECISION_EXCEEDS_MAX_PRECISION",
-      parameters = Map("precision" -> "3", "maxPrecision" -> "2"))
+      condition = "NUMERIC_VALUE_OUT_OF_RANGE.WITHOUT_SUGGESTION",
+      parameters = Map(
+        "roundedValue" -> "-10.0",
+        "originalValue" -> "-9.95",
+        "precision" -> "2",
+        "scale" -> "1"))
     checkError(
       exception = intercept[SparkArithmeticException](Decimal(1e17.toLong, 17, 0)),
-      errorClass = "NUMERIC_VALUE_OUT_OF_RANGE",
+      condition = "NUMERIC_VALUE_OUT_OF_RANGE.WITH_SUGGESTION",
       parameters = Map(
         "value" -> "0",
         "precision" -> "17",
         "scale" -> "0",
         "config" -> "\"spark.sql.ansi.enabled\""))
+    checkError(
+      exception = intercept[AnalysisException](Decimal(BigDecimal("10"), 2, -5)),
+      condition = "NEGATIVE_SCALE_DISALLOWED",
+      parameters = Map(
+        "scale" -> "-5",
+        "sqlConf" -> "\"spark.sql.legacy.allowNegativeScaleOfDecimal\""
+      ))
   }
 
   test("creating decimals with negative scale under legacy mode") {
@@ -108,15 +124,15 @@ class DecimalSuite extends SparkFunSuite with PrivateMethodTester with SQLHelper
     }
   }
 
-  test("SPARK-30252: Negative scale is not allowed by default") {
+  test("SPARK-30252, SPARK-51084: Negative scale is not allowed by default") {
     def checkNegativeScaleDecimal(d: => Decimal): Unit = {
       checkError(
-        exception = intercept[SparkException] (d),
-        errorClass = "INTERNAL_ERROR",
-        parameters = Map("message" -> ("Negative scale is not allowed: -3. " +
-          "Set the config \"spark.sql.legacy.allowNegativeScaleOfDecimal\" " +
-          "to \"true\" to allow it."))
-      )
+        exception = intercept[AnalysisException](d),
+        condition = "NEGATIVE_SCALE_DISALLOWED",
+        parameters = Map(
+          "scale" -> "-3",
+          "sqlConf" -> "\"spark.sql.legacy.allowNegativeScaleOfDecimal\""
+        ))
     }
     checkNegativeScaleDecimal(Decimal(BigDecimal("98765"), 5, -3))
     checkNegativeScaleDecimal(Decimal(BigDecimal("98765").underlying(), 5, -3))
@@ -303,6 +319,17 @@ class DecimalSuite extends SparkFunSuite with PrivateMethodTester with SQLHelper
     }
   }
 
+  test("Not supported rounding mode: HALF_DOWN") {
+    val d = Decimal(10000L, 100, 80)
+    checkError(
+      exception = intercept[SparkException] {
+        d.toPrecision(5, 50, BigDecimal.RoundingMode.HALF_DOWN)
+      },
+      condition = "INTERNAL_ERROR",
+      parameters = Map("message" -> "Not supported rounding mode: HALF_DOWN.")
+    )
+  }
+
   test("SPARK-20341: support BigInt's value does not fit in long value range") {
     val bigInt = scala.math.BigInt("9223372036854775808")
     val decimal = Decimal.apply(bigInt)
@@ -331,7 +358,7 @@ class DecimalSuite extends SparkFunSuite with PrivateMethodTester with SQLHelper
       checkError(
         exception = intercept[SparkArithmeticException](
           Decimal.fromStringANSI(UTF8String.fromString(string))),
-        errorClass = "NUMERIC_OUT_OF_SUPPORTED_RANGE",
+        condition = "NUMERIC_OUT_OF_SUPPORTED_RANGE",
         parameters = Map("value" -> string))
     }
 
@@ -351,12 +378,11 @@ class DecimalSuite extends SparkFunSuite with PrivateMethodTester with SQLHelper
     checkError(
       exception = intercept[SparkNumberFormatException](
         Decimal.fromStringANSI(UTF8String.fromString("str"))),
-      errorClass = "CAST_INVALID_INPUT",
+      condition = "CAST_INVALID_INPUT",
       parameters = Map(
         "expression" -> "'str'",
         "sourceType" -> "\"STRING\"",
-        "targetType" -> "\"DECIMAL(10,0)\"",
-        "ansiConfig" -> "\"spark.sql.ansi.enabled\""))
+        "targetType" -> "\"DECIMAL(10,0)\""))
   }
 
   test("SPARK-35841: Casting string to decimal type doesn't work " +
@@ -379,7 +405,7 @@ class DecimalSuite extends SparkFunSuite with PrivateMethodTester with SQLHelper
       checkError(
         exception = intercept[SparkArithmeticException](
           Decimal.fromStringANSI(UTF8String.fromString(string))),
-        errorClass = "NUMERIC_OUT_OF_SUPPORTED_RANGE",
+        condition = "NUMERIC_OUT_OF_SUPPORTED_RANGE",
         parameters = Map("value" -> string))
     }
 

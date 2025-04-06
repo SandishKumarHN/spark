@@ -22,12 +22,12 @@ import java.util.Collections
 import org.apache.spark.sql.{AnalysisException, DataFrame, Row, SaveMode}
 import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException
 import org.apache.spark.sql.catalyst.plans.logical.{AppendData, CreateTableAsSelect, LogicalPlan, ReplaceTableAsSelect}
-import org.apache.spark.sql.connector.catalog.{Identifier, InMemoryTableCatalog}
+import org.apache.spark.sql.connector.catalog.{Column, Identifier, InMemoryTableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.execution.QueryExecution
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.CalendarIntervalType
 import org.apache.spark.sql.util.QueryExecutionListener
 
 class DataSourceV2DataFrameSuite
@@ -178,16 +178,25 @@ class DataSourceV2DataFrameSuite
         val testCatalog = spark.sessionState.catalogManager.catalog("testcat").asTableCatalog
         testCatalog.createTable(
           Identifier.of(Array(), "table_name"),
-          new StructType().add("i", "interval"),
+          Array(Column.create("i", CalendarIntervalType)),
           Array.empty[Transform], Collections.emptyMap[String, String])
         val df = sql(s"select interval 1 millisecond as i")
         val v2Writer = df.writeTo("testcat.table_name")
-        val e1 = intercept[AnalysisException](v2Writer.append())
-        assert(e1.getMessage.contains(s"Cannot use interval type in the table schema."))
-        val e2 = intercept[AnalysisException](v2Writer.overwrite(df("i")))
-        assert(e2.getMessage.contains(s"Cannot use interval type in the table schema."))
-        val e3 = intercept[AnalysisException](v2Writer.overwritePartitions())
-        assert(e3.getMessage.contains(s"Cannot use interval type in the table schema."))
+        checkError(
+          exception = intercept[AnalysisException](v2Writer.append()),
+          condition = "_LEGACY_ERROR_TEMP_1183",
+          parameters = Map.empty
+        )
+        checkError(
+          exception = intercept[AnalysisException](v2Writer.overwrite(df("i"))),
+          condition = "_LEGACY_ERROR_TEMP_1183",
+          parameters = Map.empty
+        )
+        checkError(
+          exception = intercept[AnalysisException](v2Writer.overwritePartitions()),
+          condition = "_LEGACY_ERROR_TEMP_1183",
+          parameters = Map.empty
+        )
       }
     }
   }
@@ -252,6 +261,81 @@ class DataSourceV2DataFrameSuite
       checkAnswer(spark.table(t1), df2)
     } finally {
       spark.listenerManager.unregister(listener)
+    }
+  }
+
+  test("add columns with default values") {
+    val tableName = "testcat.ns1.ns2.tbl"
+    withTable(tableName) {
+      sql(s"CREATE TABLE $tableName (id INT, dep STRING) USING foo")
+
+      val df1 = Seq((1, "hr")).toDF("id", "dep")
+      df1.writeTo(tableName).append()
+
+      sql(s"ALTER TABLE $tableName ADD COLUMN txt STRING DEFAULT 'initial-text'")
+
+      val df2 = Seq((2, "hr"), (3, "software")).toDF("id", "dep")
+      df2.writeTo(tableName).append()
+
+      sql(s"ALTER TABLE $tableName ALTER COLUMN txt SET DEFAULT 'new-text'")
+
+      val df3 = Seq((4, "hr"), (5, "hr")).toDF("id", "dep")
+      df3.writeTo(tableName).append()
+
+      val df4 = Seq((6, "hr", null), (7, "hr", "explicit-text")).toDF("id", "dep", "txt")
+      df4.writeTo(tableName).append()
+
+      sql(s"ALTER TABLE $tableName ALTER COLUMN txt DROP DEFAULT")
+
+      val df5 = Seq((8, "hr"), (9, "hr")).toDF("id", "dep")
+      df5.writeTo(tableName).append()
+
+      checkAnswer(
+        sql(s"SELECT * FROM $tableName"),
+        Seq(
+          Row(1, "hr", "initial-text"),
+          Row(2, "hr", "initial-text"),
+          Row(3, "software", "initial-text"),
+          Row(4, "hr", "new-text"),
+          Row(5, "hr", "new-text"),
+          Row(6, "hr", null),
+          Row(7, "hr", "explicit-text"),
+          Row(8, "hr", null),
+          Row(9, "hr", null)))
+    }
+  }
+
+  test("create/replace table with default values") {
+    val tableName = "testcat.ns1.ns2.tbl"
+    withTable(tableName) {
+      sql(s"CREATE TABLE $tableName (id INT, dep STRING DEFAULT 'hr') USING foo")
+
+      val df1 = Seq(1, 2).toDF("id")
+      df1.writeTo(tableName).append()
+
+      sql(s"ALTER TABLE $tableName ALTER COLUMN dep SET DEFAULT 'it'")
+
+      val df2 = Seq(3, 4).toDF("id")
+      df2.writeTo(tableName).append()
+
+      checkAnswer(
+        sql(s"SELECT * FROM $tableName"),
+        Seq(
+          Row(1, "hr"),
+          Row(2, "hr"),
+          Row(3, "it"),
+          Row(4, "it")))
+
+      sql(s"REPLACE TABLE $tableName (id INT, dep STRING DEFAULT 'unknown') USING foo")
+
+      val df3 = Seq(1, 2).toDF("id")
+      df3.writeTo(tableName).append()
+
+      checkAnswer(
+        sql(s"SELECT * FROM $tableName"),
+        Seq(
+          Row(1, "unknown"),
+          Row(2, "unknown")))
     }
   }
 }

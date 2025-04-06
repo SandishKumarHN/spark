@@ -35,7 +35,7 @@ package object analysis {
    * Resolver should return true if the first string refers to the same entity as the second string.
    * For example, by using case insensitive equality.
    */
-  type Resolver = (String, String) => Boolean
+  type Resolver = SqlApiAnalysis.Resolver
 
   val caseInsensitiveResolution = (a: String, b: String) => a.equalsIgnoreCase(b)
   val caseSensitiveResolution = (a: String, b: String) => a == b
@@ -67,9 +67,13 @@ package object analysis {
     }
 
     def dataTypeMismatch(expr: Expression, mismatch: DataTypeMismatch): Nothing = {
+      dataTypeMismatch(toSQLExpr(expr), mismatch)
+    }
+
+    def dataTypeMismatch(sqlExpr: String, mismatch: DataTypeMismatch): Nothing = {
       throw new AnalysisException(
         errorClass = s"DATATYPE_MISMATCH.${mismatch.errorSubClass}",
-        messageParameters = mismatch.messageParameters + ("sqlExpr" -> toSQLExpr(expr)),
+        messageParameters = mismatch.messageParameters + ("sqlExpr" -> sqlExpr),
         origin = t.origin)
     }
 

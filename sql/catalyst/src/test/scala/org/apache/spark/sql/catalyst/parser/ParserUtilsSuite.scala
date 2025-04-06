@@ -16,8 +16,9 @@
  */
 package org.apache.spark.sql.catalyst.parser
 
+import scala.jdk.CollectionConverters._
+
 import org.antlr.v4.runtime.{CharStreams, CommonTokenStream, ParserRuleContext}
-import scala.collection.JavaConverters._
 
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.sql.catalyst.parser.SqlBaseParser._
@@ -28,7 +29,7 @@ class ParserUtilsSuite extends SparkFunSuite {
   import ParserUtils._
 
   val setConfContext = buildContext("set example.setting.name=setting.value") { parser =>
-    parser.statement().asInstanceOf[SetConfigurationContext]
+    parser.setResetStatement().asInstanceOf[SetConfigurationContext]
   }
 
   val showFuncContext = buildContext("show functions foo.bar") { parser =>
@@ -130,6 +131,18 @@ class ParserUtilsSuite extends SparkFunSuite {
         |cd\ef"""".stripMargin) ==
       """ab
         |cdef""".stripMargin)
+
+    // String with an invalid '\' as the last character.
+    assert(unescapeSQLString(""""abc\"""") == "abc\\")
+
+    // Strings containing invalid Unicode escapes with non-hex characters.
+    assert(unescapeSQLString("\"abc\\uXXXXa\"") == "abcuXXXXa")
+    assert(unescapeSQLString("\"abc\\uxxxxa\"") == "abcuxxxxa")
+    assert(unescapeSQLString("\"abc\\UXXXXXXXXa\"") == "abcUXXXXXXXXa")
+    assert(unescapeSQLString("\"abc\\Uxxxxxxxxa\"") == "abcUxxxxxxxxa")
+    // Guard against off-by-one errors in the "all chars are hex" routine:
+    assert(unescapeSQLString("\"abc\\uAAAXa\"") == "abcuAAAXa")
+
     // scalastyle:on nonascii
   }
 
@@ -146,7 +159,7 @@ class ParserUtilsSuite extends SparkFunSuite {
       exception = intercept[ParseException] {
         operationNotAllowed(errorMessage, showFuncContext)
       },
-      errorClass = "_LEGACY_ERROR_TEMP_0035",
+      condition = "_LEGACY_ERROR_TEMP_0035",
       parameters = Map("message" -> errorMessage))
   }
 
@@ -159,7 +172,7 @@ class ParserUtilsSuite extends SparkFunSuite {
       exception = intercept[ParseException] {
         checkDuplicateKeys(properties2, createDbContext)
       },
-      errorClass = "DUPLICATE_KEY",
+      condition = "DUPLICATE_KEY",
       parameters = Map("keyColumn" -> "`a`"))
   }
 
@@ -210,7 +223,7 @@ class ParserUtilsSuite extends SparkFunSuite {
       exception = intercept[ParseException] {
         validate(f1(emptyContext), message, emptyContext)
       },
-      errorClass = "_LEGACY_ERROR_TEMP_0064",
+      condition = "_LEGACY_ERROR_TEMP_0064",
       parameters = Map("msg" -> message))
   }
 
@@ -231,7 +244,7 @@ class ParserUtilsSuite extends SparkFunSuite {
         Some(context)
       case _ =>
         val it = ctx.children.iterator()
-        while(it.hasNext) {
+        while (it.hasNext) {
           it.next() match {
             case p: ParserRuleContext =>
               val childResult = findCastContext(p)

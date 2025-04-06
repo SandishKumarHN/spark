@@ -16,9 +16,11 @@
 #
 import unittest
 
-from pyspark.sql.connect.readwriter import DataFrameWriterV2
 from pyspark.sql.tests.test_readwriter import ReadwriterTestsMixin, ReadwriterV2TestsMixin
-from pyspark.testing.connectutils import ReusedConnectTestCase
+from pyspark.testing.connectutils import should_test_connect, ReusedConnectTestCase
+
+if should_test_connect:
+    from pyspark.sql.connect.readwriter import DataFrameWriterV2
 
 
 class ReadwriterParityTests(ReadwriterTestsMixin, ReusedConnectTestCase):
@@ -31,6 +33,7 @@ class ReadwriterV2ParityTests(ReadwriterV2TestsMixin, ReusedConnectTestCase):
 
     def test_partitioning_functions(self):
         self.check_partitioning_functions(DataFrameWriterV2)
+        self.partitioning_functions_user_error()
 
 
 if __name__ == "__main__":

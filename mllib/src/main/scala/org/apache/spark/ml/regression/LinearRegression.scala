@@ -25,7 +25,6 @@ import breeze.stats.distributions.Rand.FixedSeed.randBasis
 import breeze.stats.distributions.StudentsT
 import org.apache.hadoop.fs.Path
 
-import org.apache.spark.SparkException
 import org.apache.spark.annotation.Since
 import org.apache.spark.internal.Logging
 import org.apache.spark.ml.{PipelineStage, PredictorParams}
@@ -334,8 +333,8 @@ class LinearRegression @Since("1.3.0") (@Since("1.3.0") override val uid: String
       epsilon, maxBlockSizeInMB)
 
     if (dataset.storageLevel != StorageLevel.NONE) {
-      instr.logWarning(s"Input instances will be standardized, blockified to blocks, and " +
-        s"then cached during training. Be careful of double caching!")
+      instr.logWarning("Input instances will be standardized, blockified to blocks, and " +
+        "then cached during training. Be careful of double caching!")
     }
 
     // Extract the number of features before deciding optimization solver.
@@ -378,7 +377,7 @@ class LinearRegression @Since("1.3.0") (@Since("1.3.0") override val uid: String
       } else {
         require($(regParam) == 0.0, "The standard deviation of the label is zero. " +
           "Model cannot be regularized.")
-        instr.logWarning(s"The standard deviation of the label is zero. " +
+        instr.logWarning("The standard deviation of the label is zero. " +
           "Consider setting fitIntercept=true.")
       }
     }
@@ -428,9 +427,7 @@ class LinearRegression @Since("1.3.0") (@Since("1.3.0") override val uid: String
         featuresMean, featuresStd, initialSolution, regularization, optimizer)
 
     if (parameters == null) {
-      val msg = s"${optimizer.getClass.getName} failed."
-      instr.logError(msg)
-      throw new SparkException(msg)
+      MLUtils.optimizerFailed(instr, optimizer.getClass)
     }
 
     val model = createModel(parameters, yMean, yStd, featuresMean, featuresStd)
@@ -456,7 +453,8 @@ class LinearRegression @Since("1.3.0") (@Since("1.3.0") override val uid: String
     val model = optimizer.fit(instances, instr = OptionalInstrumentation.create(instr))
     // When it is trained by WeightedLeastSquares, training summary does not
     // attach returned model.
-    val lrModel = copyValues(new LinearRegressionModel(uid, model.coefficients, model.intercept))
+    val lrModel = copyValues(new LinearRegressionModel(
+      uid, model.coefficients.compressed, model.intercept))
     val (summaryModel, predictionColName) = lrModel.findSummaryModelAndPredictionCol()
     val trainingSummary = new LinearRegressionTrainingSummary(
       summaryModel.transform(dataset), predictionColName, $(labelCol), $(featuresCol),
@@ -475,13 +473,13 @@ class LinearRegression @Since("1.3.0") (@Since("1.3.0") override val uid: String
     // Also, if rawYStd==0 and yMean==0, all the coefficients are zero regardless of
     // the fitIntercept.
     if (yMean == 0.0) {
-      instr.logWarning(s"Mean and standard deviation of the label are zero, so the " +
-        s"coefficients and the intercept will all be zero; as a result, training is not " +
-        s"needed.")
+      instr.logWarning("Mean and standard deviation of the label are zero, so the " +
+        "coefficients and the intercept will all be zero; as a result, training is not " +
+        "needed.")
     } else {
-      instr.logWarning(s"The standard deviation of the label is zero, so the coefficients " +
-        s"will be zeros and the intercept will be the mean of the label; as a result, " +
-        s"training is not needed.")
+      instr.logWarning("The standard deviation of the label is zero, so the coefficients " +
+        "will be zeros and the intercept will be the mean of the label; as a result, " +
+        "training is not needed.")
     }
     val coefficients = Vectors.sparse(numFeatures, Seq.empty)
     val intercept = yMean
@@ -612,7 +610,7 @@ class LinearRegression @Since("1.3.0") (@Since("1.3.0") override val uid: String
       val adapt = BLAS.javaBLAS.ddot(numFeatures, solution, 1, scaledMean, 1)
       solution(numFeatures) -= adapt
     }
-    (solution, arrayBuilder.result)
+    (solution, arrayBuilder.result())
   }
 
   private def createModel(
@@ -651,6 +649,14 @@ class LinearRegression @Since("1.3.0") (@Since("1.3.0") override val uid: String
 
   @Since("1.4.0")
   override def copy(extra: ParamMap): LinearRegression = defaultCopy(extra)
+
+  override def estimateModelSize(dataset: Dataset[_]): Long = {
+    val numFeatures = DatasetUtils.getNumFeatures(dataset, $(featuresCol))
+
+    var size = this.estimateMatadataSize
+    size += Vectors.getDenseSize(numFeatures) // coefficients
+    size
+  }
 }
 
 @Since("1.6.0")
@@ -705,6 +711,9 @@ class LinearRegressionModel private[ml] (
   private[ml] def this(uid: String, coefficients: Vector, intercept: Double) =
     this(uid, coefficients, intercept, 1.0)
 
+  // For ml connect only
+  private[ml] def this() = this("", Vectors.empty, Double.NaN, Double.NaN)
+
   override val numFeatures: Int = coefficients.size
 
   /**
@@ -752,6 +761,14 @@ class LinearRegressionModel private[ml] (
     newModel.setSummary(trainingSummary).setParent(parent)
   }
 
+  private[spark] override def estimatedSize: Long = {
+    var size = this.estimateMatadataSize
+    if (this.coefficients != null) {
+      size += this.coefficients.getSizeInBytes
+    }
+    size
+  }
+
   /**
    * Returns a [[org.apache.spark.ml.util.GeneralMLWriter]] instance for this ML instance.
    *
@@ -783,11 +800,11 @@ private class InternalLinearRegressionModelWriter
     val instance = stage.asInstanceOf[LinearRegressionModel]
     val sc = sparkSession.sparkContext
     // Save metadata and Params
-    DefaultParamsWriter.saveMetadata(instance, path, sc)
+    DefaultParamsWriter.saveMetadata(instance, path, sparkSession)
     // Save model data: intercept, coefficients, scale
     val data = Data(instance.intercept, instance.coefficients, instance.scale)
     val dataPath = new Path(path, "data").toString
-    sparkSession.createDataFrame(Seq(data)).repartition(1).write.parquet(dataPath)
+    sparkSession.createDataFrame(Seq(data)).write.parquet(dataPath)
   }
 }
 
@@ -827,7 +844,7 @@ object LinearRegressionModel extends MLReadable[LinearRegressionModel] {
     private val className = classOf[LinearRegressionModel].getName
 
     override def load(path: String): LinearRegressionModel = {
-      val metadata = DefaultParamsReader.loadMetadata(path, sc, className)
+      val metadata = DefaultParamsReader.loadMetadata(path, sparkSession, className)
 
       val dataPath = new Path(path, "data").toString
       val data = sparkSession.read.format("parquet").load(dataPath)
@@ -906,7 +923,7 @@ class LinearRegressionSummary private[regression] (
     val labelCol: String,
     val featuresCol: String,
     private val privateModel: LinearRegressionModel,
-    private val diagInvAtWA: Array[Double]) extends Serializable {
+    private val diagInvAtWA: Array[Double]) extends Summary with Serializable {
 
   @transient private val metrics = {
     val weightCol =

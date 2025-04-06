@@ -19,7 +19,7 @@ package org.apache.spark.sql.execution.columnar
 
 import org.apache.commons.lang3.StringUtils
 
-import org.apache.spark.TaskContext
+import org.apache.spark.{SparkException, TaskContext}
 import org.apache.spark.network.util.JavaUtils
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
@@ -27,15 +27,18 @@ import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.{logical, QueryPlan}
 import org.apache.spark.sql.catalyst.plans.logical.{ColumnStat, LogicalPlan, Statistics}
+import org.apache.spark.sql.catalyst.types.DataTypeUtils
 import org.apache.spark.sql.catalyst.util.truncatedString
 import org.apache.spark.sql.columnar.{CachedBatch, CachedBatchSerializer, SimpleMetricsCachedBatch, SimpleMetricsCachedBatchSerializer}
 import org.apache.spark.sql.execution.{ColumnarToRowTransition, InputAdapter, QueryExecution, SparkPlan, WholeStageCodegenExec}
+import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
 import org.apache.spark.sql.execution.vectorized.{OffHeapColumnVector, OnHeapColumnVector, WritableColumnVector}
 import org.apache.spark.sql.internal.{SQLConf, StaticSQLConf}
 import org.apache.spark.sql.types.{BooleanType, ByteType, DoubleType, FloatType, IntegerType, LongType, ShortType, StructType, UserDefinedType}
 import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.{LongAccumulator, Utils}
+import org.apache.spark.util.ArrayImplicits._
 
 /**
  * The default implementation of CachedBatch.
@@ -58,7 +61,7 @@ class DefaultCachedBatchSerializer extends SimpleMetricsCachedBatchSerializer {
       schema: Seq[Attribute],
       storageLevel: StorageLevel,
       conf: SQLConf): RDD[CachedBatch] =
-    throw new IllegalStateException("Columnar input is not supported")
+    throw SparkException.internalError("Columnar input is not supported")
 
   override def convertInternalRowToCachedBatch(
       input: RDD[InternalRow],
@@ -108,8 +111,8 @@ class DefaultCachedBatchSerializer extends SimpleMetricsCachedBatchSerializer {
             rowCount += 1
           }
 
-          val stats = InternalRow.fromSeq(
-            columnBuilders.flatMap(_.columnStats.collectedStatistics).toSeq)
+          val stats = new GenericInternalRow(
+            columnBuilders.flatMap(_.columnStats.collectedStatistics))
           DefaultCachedBatch(rowCount, columnBuilders.map { builder =>
             JavaUtils.bufferToArray(builder.build())
           }, stats)
@@ -144,7 +147,7 @@ class DefaultCachedBatchSerializer extends SimpleMetricsCachedBatchSerializer {
       selectedAttributes: Seq[Attribute],
       conf: SQLConf): RDD[ColumnarBatch] = {
     val offHeapColumnVectorEnabled = conf.offHeapColumnVectorEnabled
-    val outputSchema = StructType.fromAttributes(selectedAttributes)
+    val outputSchema = DataTypeUtils.fromAttributes(selectedAttributes)
     val columnIndices =
       selectedAttributes.map(a => cacheAttributes.map(o => o.exprId).indexOf(a.exprId)).toArray
 
@@ -190,7 +193,7 @@ class DefaultCachedBatchSerializer extends SimpleMetricsCachedBatchSerializer {
     }.toArray
 
     input.mapPartitionsInternal { cachedBatchIterator =>
-      val columnarIterator = GenerateColumnAccessor.generate(columnTypes)
+      val columnarIterator = GenerateColumnAccessor.generate(columnTypes.toImmutableArraySeq)
       columnarIterator.initialize(cachedBatchIterator.asInstanceOf[Iterator[DefaultCachedBatch]],
         columnTypes,
         requestedColumnIndices.toArray)
@@ -204,7 +207,8 @@ case class CachedRDDBuilder(
     serializer: CachedBatchSerializer,
     storageLevel: StorageLevel,
     @transient cachedPlan: SparkPlan,
-    tableName: Option[String]) {
+    tableName: Option[String],
+    @transient logicalPlan: LogicalPlan) {
 
   @transient @volatile private var _cachedColumnBuffers: RDD[CachedBatch] = null
   @transient @volatile private var _cachedColumnBuffersAreLoaded: Boolean = false
@@ -215,6 +219,11 @@ case class CachedRDDBuilder(
 
   val cachedName = tableName.map(n => s"In-memory table $n")
     .getOrElse(StringUtils.abbreviate(cachedPlan.toString, 1024))
+
+  val supportsColumnarInput: Boolean = {
+    cachedPlan.supportsColumnar &&
+      serializer.supportsColumnarInput(cachedPlan.output)
+  }
 
   def cachedColumnBuffers: RDD[CachedBatch] = {
     if (_cachedColumnBuffers == null) {
@@ -263,24 +272,35 @@ case class CachedRDDBuilder(
   }
 
   private def buildBuffers(): RDD[CachedBatch] = {
-    val cb = if (cachedPlan.supportsColumnar &&
-        serializer.supportsColumnarInput(cachedPlan.output)) {
-      serializer.convertColumnarBatchToCachedBatch(
-        cachedPlan.executeColumnar(),
-        cachedPlan.output,
-        storageLevel,
-        cachedPlan.conf)
-    } else {
-      serializer.convertInternalRowToCachedBatch(
-        cachedPlan.execute(),
-        cachedPlan.output,
-        storageLevel,
-        cachedPlan.conf)
+    val cb = try {
+      if (supportsColumnarInput) {
+        serializer.convertColumnarBatchToCachedBatch(
+          cachedPlan.executeColumnar(),
+          cachedPlan.output,
+          storageLevel,
+          cachedPlan.conf)
+      } else {
+        serializer.convertInternalRowToCachedBatch(
+          cachedPlan.execute(),
+          cachedPlan.output,
+          storageLevel,
+          cachedPlan.conf)
+      }
+    } catch {
+      case e: Throwable if cachedPlan.isInstanceOf[AdaptiveSparkPlanExec] =>
+        // SPARK-49982: during RDD execution, AQE will execute all stages except ResultStage. If any
+        // failure happen, the failure will be cached and the next SQL cache caller will hit the
+        // negative cache. Therefore we need to recache the plan.
+        val session = cachedPlan.session
+        session.sharedState.cacheManager.recacheByPlan(session, logicalPlan)
+        throw e
     }
     val cached = cb.mapPartitionsInternal { it =>
-      TaskContext.get().addTaskCompletionListener[Unit](_ => {
-        materializedPartitions.add(1L)
-      })
+      TaskContext.get().addTaskCompletionListener[Unit] { context =>
+        if (!context.isFailed() && !context.isInterrupted()) {
+          materializedPartitions.add(1L)
+        }
+      }
       new Iterator[CachedBatch] {
         override def hasNext: Boolean = it.hasNext
         override def next(): CachedBatch = {
@@ -322,6 +342,11 @@ object InMemoryRelation {
     }
     case c2r: ColumnarToRowTransition => // This matches when whole stage code gen is disabled.
       c2r.child
+    case adaptive: AdaptiveSparkPlanExec =>
+      // If AQE is enabled for cached plan and table cache supports columnar in, we should mark
+      // `AdaptiveSparkPlanExec.supportsColumnar` as true to avoid inserting `ColumnarToRow`, so
+      // that `CachedBatchSerializer` can use `convertColumnarBatchToCachedBatch` to cache data.
+      adaptive.copy(supportsColumnar = true)
     case _ => plan
   }
 
@@ -336,7 +361,7 @@ object InMemoryRelation {
     } else {
       qe.executedPlan
     }
-    val cacheBuilder = CachedRDDBuilder(serializer, storageLevel, child, tableName)
+    val cacheBuilder = CachedRDDBuilder(serializer, storageLevel, child, tableName, qe.logical)
     val relation = new InMemoryRelation(child.output, cacheBuilder, optimizedPlan.outputOrdering)
     relation.statsOfPlanToCache = optimizedPlan.stats
     relation
@@ -351,7 +376,7 @@ object InMemoryRelation {
       child: SparkPlan,
       tableName: Option[String],
       optimizedPlan: LogicalPlan): InMemoryRelation = {
-    val cacheBuilder = CachedRDDBuilder(serializer, storageLevel, child, tableName)
+    val cacheBuilder = CachedRDDBuilder(serializer, storageLevel, child, tableName, optimizedPlan)
     val relation = new InMemoryRelation(child.output, cacheBuilder, optimizedPlan.outputOrdering)
     relation.statsOfPlanToCache = optimizedPlan.stats
     relation
@@ -392,7 +417,7 @@ case class InMemoryRelation(
   override def innerChildren: Seq[SparkPlan] = Seq(cachedPlan)
 
   override def doCanonicalize(): logical.LogicalPlan =
-    copy(output = output.map(QueryPlan.normalizeExpressions(_, cachedPlan.output)),
+    copy(output = output.map(QueryPlan.normalizeExpressions(_, output)),
       cacheBuilder,
       outputOrdering)
 

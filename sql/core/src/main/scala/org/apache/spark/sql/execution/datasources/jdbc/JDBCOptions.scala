@@ -28,6 +28,7 @@ import org.apache.spark.sql.catalyst.util.CaseInsensitiveMap
 import org.apache.spark.sql.errors.QueryExecutionErrors
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.TimestampNTZType
+import org.apache.spark.util.Utils
 
 /**
  * Options for the JDBC data source.
@@ -51,7 +52,14 @@ class JDBCOptions(
    */
   val asProperties: Properties = {
     val properties = new Properties()
-    parameters.originalMap.foreach { case (k, v) => properties.setProperty(k, v) }
+    parameters.originalMap.foreach { case (k, v) =>
+      // If an option value is `null`, throw a user-friendly error. Keys here cannot be null, as
+      // scala's implementation of Maps prohibits null keys.
+      if (v == null) {
+        throw QueryExecutionErrors.nullDataSourceOption(k)
+      }
+      properties.setProperty(k, v)
+    }
     properties
   }
 
@@ -62,7 +70,8 @@ class JDBCOptions(
    */
   val asConnectionProperties: Properties = {
     val properties = new Properties()
-    parameters.originalMap.filterKeys(key => !jdbcOptionNames(key.toLowerCase(Locale.ROOT)))
+    parameters.originalMap
+      .filter { case (key, _) => !jdbcOptionNames(key.toLowerCase(Locale.ROOT)) }
       .foreach { case (k, v) => properties.setProperty(k, v) }
     properties
   }
@@ -239,6 +248,23 @@ class JDBCOptions(
       .get(JDBC_PREFER_TIMESTAMP_NTZ)
       .map(_.toBoolean)
       .getOrElse(SQLConf.get.timestampType == TimestampNTZType)
+
+  val hint = parameters.get(JDBC_HINT_STRING).map(value => {
+    require(value.matches("(?s)^/\\*\\+ .* \\*/$"),
+      s"Invalid value `$value` for option `$JDBC_HINT_STRING`." +
+        s" It should start with `/*+ ` and end with ` */`.")
+      s"$value "
+    }).getOrElse("")
+
+  override def hashCode: Int = this.parameters.hashCode()
+
+  override def equals(other: Any): Boolean = other match {
+    case otherOption: JDBCOptions =>
+      otherOption.parameters.equals(this.parameters)
+    case _ => false
+  }
+
+  def getRedactUrl(): String = Utils.redact(SQLConf.get.stringRedactionPattern, url)
 }
 
 class JdbcOptionsInWrite(
@@ -302,4 +328,5 @@ object JDBCOptions {
   val JDBC_CONNECTION_PROVIDER = newOption("connectionProvider")
   val JDBC_PREPARE_QUERY = newOption("prepareQuery")
   val JDBC_PREFER_TIMESTAMP_NTZ = newOption("preferTimestampNTZ")
+  val JDBC_HINT_STRING = newOption("hint")
 }

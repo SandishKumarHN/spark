@@ -124,12 +124,14 @@ class UseSingleWatermarkPropagator extends WatermarkPropagator {
 /**
  * This implementation simulates propagation of watermark among operators.
  *
- * The simulation algorithm traverses the physical plan tree via post-order (children first) to
- * calculate (input watermark, output watermark) for all nodes.
+ * It is considered a "simulation" because watermarks are not being physically sent between
+ * operators, but rather propagated up the tree via post-order (children first) traversal of
+ * the query plan. This allows Structured Streaming to determine the new (input watermark, output
+ * watermark) for all nodes.
  *
  * For each node, below logic is applied:
  *
- * - Input watermark for specific node is decided by `min(input watermarks from all children)`.
+ * - Input watermark for specific node is decided by `min(output watermarks from all children)`.
  *   -- Children providing no input watermark (DEFAULT_WATERMARK_MS) are excluded.
  *   -- If there is no valid input watermark from children, input watermark = DEFAULT_WATERMARK_MS.
  * - Output watermark for specific node is decided as following:
@@ -181,7 +183,6 @@ class PropagateWatermarkSimulator extends WatermarkPropagator with Logging {
   }
 
   private def doSimulate(batchId: Long, plan: SparkPlan, originWatermark: Long): Unit = {
-    val statefulOperatorIdToNodeId = mutable.HashMap[Long, Int]()
     val nodeToOutputWatermark = mutable.HashMap[Int, Option[Long]]()
     val nextStatefulOperatorToWatermark = mutable.HashMap[Long, Option[Long]]()
 
@@ -190,9 +191,9 @@ class PropagateWatermarkSimulator extends WatermarkPropagator with Logging {
       case node: EventTimeWatermarkExec =>
         val inputWatermarks = getInputWatermarks(node, nodeToOutputWatermark)
         if (inputWatermarks.nonEmpty) {
-          throw new AnalysisException("Redefining watermark is disallowed. You can set the " +
-            s"config '${SQLConf.STATEFUL_OPERATOR_ALLOW_MULTIPLE.key}' to 'false' to restore " +
-            "the previous behavior. Note that multiple stateful operators will be disallowed.")
+          throw new AnalysisException(
+            errorClass = "_LEGACY_ERROR_TEMP_3076",
+            messageParameters = Map("config" -> SQLConf.STATEFUL_OPERATOR_ALLOW_MULTIPLE.key))
         }
 
         nodeToOutputWatermark.put(node.id, Some(originWatermark))
@@ -200,7 +201,6 @@ class PropagateWatermarkSimulator extends WatermarkPropagator with Logging {
 
       case node: StateStoreWriter =>
         val stOpId = node.stateInfo.get.operatorId
-        statefulOperatorIdToNodeId.put(stOpId, node.id)
 
         val inputWatermarks = getInputWatermarks(node, nodeToOutputWatermark)
 

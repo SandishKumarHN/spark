@@ -28,6 +28,7 @@ import org.apache.parquet.schema.Type.Repetition._
 
 import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.errors.QueryCompilationErrors
+import org.apache.spark.sql.execution.datasources.VariantMetadata
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 
@@ -71,13 +72,6 @@ class ParquetToSparkSchemaConverter(
     caseSensitive = conf.get(SQLConf.CASE_SENSITIVE.key).toBoolean,
     inferTimestampNTZ = conf.get(SQLConf.PARQUET_INFER_TIMESTAMP_NTZ_ENABLED.key).toBoolean,
     nanosAsLong = conf.get(SQLConf.LEGACY_PARQUET_NANOS_AS_LONG.key).toBoolean)
-
-  /**
-   * Returns true if TIMESTAMP_NTZ type is enabled in this ParquetToSparkSchemaConverter.
-   */
-  def isTimestampNTZEnabled(): Boolean = {
-    inferTimestampNTZ
-  }
 
   /**
    * Converts Parquet [[MessageType]] `parquetSchema` to a Spark SQL [[StructType]].
@@ -185,6 +179,16 @@ class ParquetToSparkSchemaConverter(
     }
     field match {
       case primitiveColumn: PrimitiveColumnIO => convertPrimitiveField(primitiveColumn, targetType)
+      case groupColumn: GroupColumnIO if targetType.contains(VariantType) =>
+        if (SQLConf.get.getConf(SQLConf.VARIANT_ALLOW_READING_SHREDDED)) {
+          val col = convertGroupField(groupColumn)
+          col.copy(sparkType = VariantType, variantFileType = Some(col))
+        } else {
+          convertVariantField(groupColumn)
+        }
+      case groupColumn: GroupColumnIO if targetType.exists(VariantMetadata.isVariantStruct) =>
+        val col = convertGroupField(groupColumn)
+        col.copy(sparkType = targetType.get, variantFileType = Some(col))
       case groupColumn: GroupColumnIO => convertGroupField(groupColumn, targetType)
     }
   }
@@ -280,7 +284,11 @@ class ParquetToSparkSchemaConverter(
           case timestamp: TimestampLogicalTypeAnnotation
             if timestamp.getUnit == TimeUnit.NANOS && nanosAsLong =>
             LongType
-          case _ => illegalType()
+          case time: TimeLogicalTypeAnnotation
+            if time.getUnit == TimeUnit.MICROS && !time.isAdjustedToUTC =>
+            TimeType(TimeType.MICROS_PRECISION)
+          case _ =>
+            illegalType()
         }
 
       case INT96 =>
@@ -404,6 +412,33 @@ class ParquetToSparkSchemaConverter(
       case _ =>
         throw QueryCompilationErrors.unrecognizedParquetTypeError(field.toString)
     }
+  }
+
+  private def convertVariantField(groupColumn: GroupColumnIO): ParquetColumn = {
+    if (groupColumn.getChildrenCount != 2) {
+      // We may allow more than two children in the future, so consider this unsupported.
+      throw QueryCompilationErrors.invalidVariantWrongNumFieldsError()
+    }
+    // Find the binary columns, and validate that they have the correct type.
+    val valueAndMetadata = Seq("value", "metadata").map { colName =>
+      val idx = (0 until groupColumn.getChildrenCount)
+          .find(groupColumn.getChild(_).getName == colName)
+      if (idx.isEmpty) {
+        throw QueryCompilationErrors.invalidVariantMissingFieldError(colName)
+      }
+      val child = groupColumn.getChild(idx.get)
+      // The value and metadata cannot be individually null, only the full struct can.
+      if (child.getType.getRepetition != REQUIRED ||
+          !child.isInstanceOf[PrimitiveColumnIO] ||
+          child.asInstanceOf[PrimitiveColumnIO].getPrimitive != BINARY) {
+        throw QueryCompilationErrors.invalidVariantNullableOrNotBinaryFieldError(colName)
+      }
+      child
+    }
+    ParquetColumn(VariantType, groupColumn, Seq(
+      convertField(valueAndMetadata(0), Some(BinaryType)),
+      convertField(valueAndMetadata(1), Some(BinaryType))
+    ))
   }
 
   // scalastyle:off
@@ -539,13 +574,17 @@ class SparkToParquetSchemaConverter(
       case DoubleType =>
         Types.primitive(DOUBLE, repetition).named(field.name)
 
-      case StringType =>
+      case _: StringType =>
         Types.primitive(BINARY, repetition)
           .as(LogicalTypeAnnotation.stringType()).named(field.name)
 
       case DateType =>
         Types.primitive(INT32, repetition)
           .as(LogicalTypeAnnotation.dateType()).named(field.name)
+
+      case _: TimeType =>
+        Types.primitive(INT64, repetition)
+          .as(LogicalTypeAnnotation.timeType(false, TimeUnit.MICROS)).named(field.name)
 
       // NOTE: Spark SQL can write timestamp values to Parquet using INT96, TIMESTAMP_MICROS or
       // TIMESTAMP_MILLIS. TIMESTAMP_MICROS is recommended but INT96 is the default to keep the
@@ -646,7 +685,6 @@ class SparkToParquetSchemaConverter(
           .buildGroup(repetition).as(LogicalTypeAnnotation.listType())
           .addField(Types
             .buildGroup(REPEATED)
-            // "array" is the name chosen by parquet-hive (1.7.0 and prior version)
             .addField(convertField(StructField("array", elementType, nullable)))
             .named("bag"))
           .named(field.name)
@@ -720,6 +758,20 @@ class SparkToParquetSchemaConverter(
       // Other types
       // ===========
 
+      case VariantType =>
+        Types.buildGroup(repetition)
+          .addField(convertField(StructField("value", BinaryType, nullable = false)))
+          .addField(convertField(StructField("metadata", BinaryType, nullable = false)))
+          .named(field.name)
+
+      case s: StructType if SparkShreddingUtils.isVariantShreddingStruct(s) =>
+        // Variant struct takes a Variant and writes to Parquet as a shredded schema.
+        val group = Types.buildGroup(repetition)
+        s.fields.foreach { f =>
+          group.addField(convertField(f))
+        }
+        group.named(field.name)
+
       case StructType(fields) =>
         fields.foldLeft(Types.buildGroup(repetition)) { (builder, field) =>
           builder.addField(convertField(field))
@@ -742,7 +794,9 @@ private[sql] object ParquetSchemaConverter {
 
   def checkConversionRequirement(f: => Boolean, message: String): Unit = {
     if (!f) {
-      throw new AnalysisException(message)
+      throw new AnalysisException(
+        errorClass = "_LEGACY_ERROR_TEMP_3071",
+        messageParameters = Map("msg" -> message))
     }
   }
 }

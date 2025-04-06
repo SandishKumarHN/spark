@@ -213,6 +213,9 @@ class IsotonicRegressionModel private[ml] (
     private val oldModel: MLlibIsotonicRegressionModel)
   extends Model[IsotonicRegressionModel] with IsotonicRegressionBase with MLWritable {
 
+  // For ml connect only
+  private[ml] def this() = this("", null)
+
   /** @group setParam */
   @Since("1.5.0")
   def setFeaturesCol(value: String): this.type = set(featuresCol, value)
@@ -301,12 +304,12 @@ object IsotonicRegressionModel extends MLReadable[IsotonicRegressionModel] {
 
     override protected def saveImpl(path: String): Unit = {
       // Save metadata and Params
-      DefaultParamsWriter.saveMetadata(instance, path, sc)
+      DefaultParamsWriter.saveMetadata(instance, path, sparkSession)
       // Save model data: boundaries, predictions, isotonic
       val data = Data(
         instance.oldModel.boundaries, instance.oldModel.predictions, instance.oldModel.isotonic)
       val dataPath = new Path(path, "data").toString
-      sparkSession.createDataFrame(Seq(data)).repartition(1).write.parquet(dataPath)
+      sparkSession.createDataFrame(Seq(data)).write.parquet(dataPath)
     }
   }
 
@@ -316,7 +319,7 @@ object IsotonicRegressionModel extends MLReadable[IsotonicRegressionModel] {
     private val className = classOf[IsotonicRegressionModel].getName
 
     override def load(path: String): IsotonicRegressionModel = {
-      val metadata = DefaultParamsReader.loadMetadata(path, sc, className)
+      val metadata = DefaultParamsReader.loadMetadata(path, sparkSession, className)
 
       val dataPath = new Path(path, "data").toString
       val data = sparkSession.read.parquet(dataPath)

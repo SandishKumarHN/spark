@@ -24,7 +24,7 @@ import test.org.apache.spark.sql.connector.catalog.functions.JavaLongAdd._
 import test.org.apache.spark.sql.connector.catalog.functions.JavaRandomAdd._
 import test.org.apache.spark.sql.connector.catalog.functions.JavaStrLen._
 
-import org.apache.spark.SparkException
+import org.apache.spark.SparkUnsupportedOperationException
 import org.apache.spark.sql.{AnalysisException, DataFrame, Row}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.CodegenObjectFactoryMode.{FALLBACK, NO_CODEGEN}
@@ -145,7 +145,7 @@ class DataSourceV2FunctionSuite extends DatasourceV2SQLBase {
       exception = intercept[AnalysisException](
         sql("SELECT testcat.non_exist('abc')").collect()
       ),
-      errorClass = "UNRESOLVED_ROUTINE",
+      condition = "UNRESOLVED_ROUTINE",
       parameters = Map(
         "routineName" -> "`testcat`.`non_exist`",
         "searchPath" -> "[`system`.`builtin`, `system`.`session`, `testcat`.`default`]"),
@@ -157,24 +157,39 @@ class DataSourceV2FunctionSuite extends DatasourceV2SQLBase {
 
   test("non-function catalog") {
     withSQLConf("spark.sql.catalog.testcat" -> classOf[BasicInMemoryTableCatalog].getName) {
-      assert(intercept[AnalysisException](
-        sql("SELECT testcat.strlen('abc')").collect()
-      ).getMessage.contains("Catalog testcat does not support functions"))
+      checkError(
+        exception = intercept[AnalysisException](
+          sql("SELECT testcat.strlen('abc')").collect()
+        ),
+        condition = "_LEGACY_ERROR_TEMP_1184",
+        parameters = Map("plugin" -> "testcat", "ability" -> "functions")
+      )
     }
   }
 
   test("DESCRIBE FUNCTION: only support session catalog") {
     addFunction(Identifier.of(Array.empty, "abc"), new JavaStrLen(new JavaStrLenNoImpl))
 
-    val e = intercept[AnalysisException] {
-      sql("DESCRIBE FUNCTION testcat.abc")
-    }
-    assert(e.message.contains("Catalog testcat does not support functions"))
+    checkError(
+      exception = intercept[AnalysisException] {
+        sql("DESCRIBE FUNCTION testcat.abc")
+      },
+      condition = "_LEGACY_ERROR_TEMP_1184",
+      parameters = Map(
+        "plugin" -> "testcat",
+        "ability" -> "functions"
+      )
+    )
 
-    val e1 = intercept[AnalysisException] {
-      sql("DESCRIBE FUNCTION default.ns1.ns2.fun")
-    }
-    assert(e1.message.contains("requires a single-part namespace"))
+    checkError(
+      exception = intercept[AnalysisException] {
+        sql("DESCRIBE FUNCTION default.ns1.ns2.fun")
+      },
+      condition = "REQUIRES_SINGLE_PART_NAMESPACE",
+      parameters = Map(
+        "sessionCatalog" -> "spark_catalog",
+        "namespace" -> "`default`.`ns1`.`ns2`")
+    )
   }
 
   test("DROP FUNCTION: only support session catalog") {
@@ -307,8 +322,7 @@ class DataSourceV2FunctionSuite extends DatasourceV2SQLBase {
   test("scalar function: bad magic method") {
     catalog("testcat").asInstanceOf[SupportsNamespaces].createNamespace(Array("ns"), emptyProps)
     addFunction(Identifier.of(Array("ns"), "strlen"), StrLen(StrLenBadMagic))
-    assert(intercept[SparkException](sql("SELECT testcat.ns.strlen('abc')").collect())
-      .getMessage.contains("Cannot find a compatible"))
+    intercept[SparkUnsupportedOperationException](sql("SELECT testcat.ns.strlen('abc')").collect())
   }
 
   test("scalar function: bad magic method with default impl") {
@@ -320,17 +334,42 @@ class DataSourceV2FunctionSuite extends DatasourceV2SQLBase {
   test("scalar function: no implementation found") {
     catalog("testcat").asInstanceOf[SupportsNamespaces].createNamespace(Array("ns"), emptyProps)
     addFunction(Identifier.of(Array("ns"), "strlen"), StrLen(StrLenNoImpl))
-    intercept[SparkException](sql("SELECT testcat.ns.strlen('abc')").collect())
+    intercept[SparkUnsupportedOperationException](sql("SELECT testcat.ns.strlen('abc')").collect())
   }
 
   test("scalar function: invalid parameter type or length") {
     catalog("testcat").asInstanceOf[SupportsNamespaces].createNamespace(Array("ns"), emptyProps)
     addFunction(Identifier.of(Array("ns"), "strlen"), StrLen(StrLenDefault))
 
-    assert(intercept[AnalysisException](sql("SELECT testcat.ns.strlen(42)"))
-      .getMessage.contains("Expect StringType"))
-    assert(intercept[AnalysisException](sql("SELECT testcat.ns.strlen('a', 'b')"))
-      .getMessage.contains("Expect exactly one argument"))
+    checkError(
+      exception = intercept[AnalysisException](sql("SELECT testcat.ns.strlen(42)")),
+      condition = "_LEGACY_ERROR_TEMP_1198",
+      parameters = Map(
+        "unbound" -> "strlen",
+        "arguments" -> "int",
+        "unsupported" -> "Expect StringType"
+      ),
+      context = ExpectedContext(
+        fragment = "testcat.ns.strlen(42)",
+        start = 7,
+        stop = 27
+      )
+    )
+
+    checkError(
+      exception = intercept[AnalysisException](sql("SELECT testcat.ns.strlen('a', 'b')")),
+      condition = "_LEGACY_ERROR_TEMP_1198",
+      parameters = Map(
+        "unbound" -> "strlen",
+        "arguments" -> "string, string",
+        "unsupported" -> "Expect exactly one argument"
+      ),
+      context = ExpectedContext(
+        fragment = "testcat.ns.strlen('a', 'b')",
+        start = 7,
+        stop = 33
+      )
+    )
   }
 
   test("scalar function: default produceResult in Java") {
@@ -373,22 +412,67 @@ class DataSourceV2FunctionSuite extends DatasourceV2SQLBase {
     catalog("testcat").asInstanceOf[SupportsNamespaces].createNamespace(Array("ns"), emptyProps)
     addFunction(Identifier.of(Array("ns"), "strlen"),
       new JavaStrLen(new JavaStrLenNoImpl))
-    assert(intercept[AnalysisException](sql("SELECT testcat.ns.strlen('abc')").collect())
-      .getMessage.contains("neither implement magic method nor override 'produceResult'"))
+    checkError(
+      exception = intercept[AnalysisException](sql("SELECT testcat.ns.strlen('abc')").collect()),
+      condition = "SCALAR_FUNCTION_NOT_FULLY_IMPLEMENTED",
+      parameters = Map("scalarFunc" -> "`strlen`"),
+      context = ExpectedContext(
+        fragment = "testcat.ns.strlen('abc')",
+        start = 7,
+        stop = 30
+      )
+    )
   }
 
   test("SPARK-35390: scalar function w/ bad input types") {
     catalog("testcat").asInstanceOf[SupportsNamespaces].createNamespace(Array("ns"), emptyProps)
     addFunction(Identifier.of(Array("ns"), "strlen"), StrLen(StrLenBadInputTypes))
-    assert(intercept[AnalysisException](sql("SELECT testcat.ns.strlen('abc')").collect())
-        .getMessage.contains("parameters returned from 'inputTypes()'"))
+    checkError(
+      exception = intercept[AnalysisException](sql("SELECT testcat.ns.strlen('abc')").collect()),
+      condition = "_LEGACY_ERROR_TEMP_1199",
+      parameters = Map(
+        "bound" -> "strlen_bad_input_types",
+        "argsLen" -> "1",
+        "inputTypesLen" -> "2"
+      ),
+      context = ExpectedContext(
+        fragment = "testcat.ns.strlen('abc')",
+        start = 7,
+        stop = 30
+      )
+    )
   }
 
   test("SPARK-35390: scalar function w/ mismatch type parameters from magic method") {
     catalog("testcat").asInstanceOf[SupportsNamespaces].createNamespace(Array("ns"), emptyProps)
     addFunction(Identifier.of(Array("ns"), "add"), new JavaLongAdd(new JavaLongAddMismatchMagic))
-    assert(intercept[AnalysisException](sql("SELECT testcat.ns.add(1L, 2L)").collect())
-        .getMessage.contains("neither implement magic method nor override 'produceResult'"))
+    checkError(
+      exception = intercept[AnalysisException](sql("SELECT testcat.ns.add(1L, 2L)").collect()),
+      condition = "SCALAR_FUNCTION_NOT_FULLY_IMPLEMENTED",
+      parameters = Map("scalarFunc" -> "`long_add_mismatch_magic`"),
+      context = ExpectedContext(
+        fragment = "testcat.ns.add(1L, 2L)",
+        start = 7,
+        stop = 28
+      )
+    )
+  }
+
+  test("SPARK-49549: scalar function w/ mismatch a compatible ScalarFunction#produceResult") {
+    case object CharLength extends ScalarFunction[Int] {
+      override def inputTypes(): Array[DataType] = Array(StringType)
+      override def resultType(): DataType = IntegerType
+      override def name(): String = "CHAR_LENGTH"
+    }
+
+    catalog("testcat").asInstanceOf[SupportsNamespaces].createNamespace(Array("ns"), emptyProps)
+    addFunction(Identifier.of(Array("ns"), "my_strlen"), StrLen(CharLength))
+    checkError(
+      exception = intercept[SparkUnsupportedOperationException]
+        (sql("SELECT testcat.ns.my_strlen('abc')").collect()),
+      condition = "SCALAR_FUNCTION_NOT_COMPATIBLE",
+      parameters = Map("scalarFunc" -> "`CHAR_LENGTH`")
+    )
   }
 
   test("SPARK-35390: scalar function w/ type coercion") {
@@ -402,10 +486,33 @@ class DataSourceV2FunctionSuite extends DatasourceV2SQLBase {
       checkAnswer(sql(s"SELECT testcat.ns.$name(42L, 58)"), Row(100) :: Nil)
       checkAnswer(sql(s"SELECT testcat.ns.$name(42, 58L)"), Row(100) :: Nil)
 
+      val paramIndex = name match {
+        case "add" => "first"
+        case "add2" => "second"
+        case "add3" => "first"
+      }
+
       // can't cast date time interval to long
-      assert(intercept[AnalysisException](
-        sql(s"SELECT testcat.ns.$name(date '2021-06-01' - date '2011-06-01', 93)").collect())
-          .getMessage.contains("due to data type mismatch"))
+      val sqlText = s"SELECT testcat.ns.$name(date '2021-06-01' - date '2011-06-01', 93)"
+      checkErrorMatchPVals(
+        exception = intercept[AnalysisException] {
+          sql(sqlText).collect()
+        },
+        condition = "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
+        sqlState = None,
+        parameters = Map(
+          "sqlExpr" -> ".*",
+          "paramIndex" -> paramIndex,
+          "inputSql" -> "\"\\(DATE '2021-06-01' - DATE '2011-06-01'\\)\"",
+          "inputType" -> "\"INTERVAL DAY\"",
+          "requiredType" -> "\"BIGINT\""
+        ),
+        context = ExpectedContext(
+          fragment = s"testcat.ns.$name(date '2021-06-01' - date '2011-06-01', 93)",
+          start = 7,
+          stop = sqlText.length - 1
+        )
+      )
     }
   }
 
@@ -446,8 +553,17 @@ class DataSourceV2FunctionSuite extends DatasourceV2SQLBase {
     catalog("testcat").asInstanceOf[SupportsNamespaces].createNamespace(Array("ns"), emptyProps)
     addFunction(Identifier.of(Array("ns"), "strlen"), StrLen(BadBoundFunction))
 
-    assert(intercept[AnalysisException](sql("SELECT testcat.ns.strlen('abc')"))
-      .getMessage.contains("does not implement ScalarFunction or AggregateFunction"))
+    checkError(
+      exception = intercept[AnalysisException](
+        sql("SELECT testcat.ns.strlen('abc')")),
+      condition = "INVALID_UDF_IMPLEMENTATION",
+      parameters = Map(
+        "funcName" -> "`bad_bound_func`"),
+      context = ExpectedContext(
+        fragment = "testcat.ns.strlen('abc')",
+        start = 7,
+        stop = 30)
+    )
   }
 
   test("aggregate function: lookup int average") {
@@ -501,8 +617,20 @@ class DataSourceV2FunctionSuite extends DatasourceV2SQLBase {
       addFunction(Identifier.of(Array("ns"), "avg"), IntegralAverage)
 
       Seq(1.toShort, 2.toShort).toDF("i").write.saveAsTable(t)
-      assert(intercept[AnalysisException](sql(s"SELECT testcat.ns.avg(i) from $t"))
-        .getMessage.contains("Unsupported non-integral type: ShortType"))
+      checkError(
+        exception = intercept[AnalysisException](sql(s"SELECT testcat.ns.avg(i) from $t")),
+        condition = "_LEGACY_ERROR_TEMP_1198",
+        parameters = Map(
+          "unbound" -> "iavg",
+          "arguments" -> "smallint",
+          "unsupported" -> "Unsupported non-integral type: ShortType"
+        ),
+        context = ExpectedContext(
+          fragment = "testcat.ns.avg(i)",
+          start = 7,
+          stop = 23
+        )
+      )
     }
   }
 
@@ -521,9 +649,25 @@ class DataSourceV2FunctionSuite extends DatasourceV2SQLBase {
         Row(BigDecimal(50.5)) :: Nil)
 
       // can't cast interval to decimal
-      assert(intercept[AnalysisException](sql("SELECT testcat.ns.avg(*) from values" +
-          " (date '2021-06-01' - date '2011-06-01'), (date '2000-01-01' - date '1900-01-01')"))
-          .getMessage.contains("due to data type mismatch"))
+      checkError(
+        exception = intercept[AnalysisException] {
+          sql("SELECT testcat.ns.avg(*) from values " +
+            "(date '2021-06-01' - date '2011-06-01'), (date '2000-01-01' - date '1900-01-01')")
+        },
+        condition = "DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE",
+        parameters = Map(
+          "sqlExpr" -> "\"v2aggregator(col1)\"",
+          "paramIndex" -> "first",
+          "inputSql" -> "\"col1\"",
+          "inputType" -> "\"INTERVAL DAY\"",
+          "requiredType" -> "\"DECIMAL(38,18)\""
+        ),
+        context = ExpectedContext(
+          fragment = "testcat.ns.avg(*)",
+          start = 7,
+          stop = 23
+        )
+      )
     }
   }
 
@@ -550,6 +694,16 @@ class DataSourceV2FunctionSuite extends DatasourceV2SQLBase {
         new JavaRandomAdd(new JavaRandomAddDefault))
       checkDeterministic(sql("SELECT testcat.ns.add(10, testcat.ns.rand_add(42))"))
     }
+  }
+
+  test("SPARK-44930: Fold deterministic ApplyFunctionExpression") {
+    catalog("testcat").asInstanceOf[SupportsNamespaces].createNamespace(Array("ns"), emptyProps)
+    addFunction(Identifier.of(Array("ns"), "strlen"), StrLen(StrLenDefault))
+
+    val df1 = sql("SELECT testcat.ns.strlen('abc') as col1")
+    val df2 = sql("SELECT 3 as col1")
+    comparePlans(df1.queryExecution.optimizedPlan, df2.queryExecution.optimizedPlan)
+    checkAnswer(df1, Row(3) :: Nil)
   }
 
   private case object StrLenDefault extends ScalarFunction[Int] {
@@ -671,7 +825,7 @@ class DataSourceV2FunctionSuite extends DatasourceV2SQLBase {
     override def description(): String = name()
 
     override def bind(inputType: StructType): BoundFunction = {
-      throw new UnsupportedOperationException(s"Not implemented")
+      throw SparkUnsupportedOperationException()
     }
   }
 }

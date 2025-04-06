@@ -87,7 +87,7 @@ class HiveSQLViewSuite extends SQLViewSuite with TestHiveSingleton {
             }
             checkError(
               exception = e,
-              errorClass = "INVALID_TEMP_OBJ_REFERENCE",
+              condition = "INVALID_TEMP_OBJ_REFERENCE",
               parameters = Map(
                 "obj" -> "VIEW",
                 "objName" -> s"`$SESSION_CATALOG_NAME`.`default`.`view1`",
@@ -209,17 +209,28 @@ class HiveSQLViewSuite extends SQLViewSuite with TestHiveSingleton {
            """.stripMargin
         )
 
-        val cause = intercept[AnalysisException] {
-          sql("SHOW CREATE TABLE v1")
-        }
-
-        assert(cause.getMessage.contains(" - partitioned view"))
-
-        val causeForSpark = intercept[AnalysisException] {
-          sql("SHOW CREATE TABLE v1 AS SERDE")
-        }
-
-        assert(causeForSpark.getMessage.contains(" - partitioned view"))
+        checkError(
+          exception = intercept[AnalysisException] {
+            sql("SHOW CREATE TABLE v1")
+          },
+          condition = "UNSUPPORTED_SHOW_CREATE_TABLE.WITH_UNSUPPORTED_FEATURE",
+          sqlState = "0A000",
+          parameters = Map(
+            "tableName" -> s"`$SESSION_CATALOG_NAME`.`default`.`v1`",
+            "unsupportedFeatures" -> " - partitioned view"
+          )
+        )
+        checkError(
+          exception = intercept[AnalysisException] {
+            sql("SHOW CREATE TABLE v1 AS SERDE")
+          },
+          condition = "UNSUPPORTED_SHOW_CREATE_TABLE.WITH_UNSUPPORTED_FEATURE",
+          sqlState = "0A000",
+          parameters = Map(
+            "tableName" -> s"`$SESSION_CATALOG_NAME`.`default`.`v1`",
+            "unsupportedFeatures" -> " - partitioned view"
+          )
+        )
       }
     }
   }

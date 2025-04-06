@@ -29,6 +29,7 @@ import org.apache.spark.sql.catalyst.encoders.ExamplePointUDT
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenContext
 import org.apache.spark.sql.catalyst.parser.CatalystSqlParser
 import org.apache.spark.sql.catalyst.util.{ArrayData, GenericArrayData}
+import org.apache.spark.sql.catalyst.util.TypeUtils.ordinalNumber
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 
@@ -134,20 +135,27 @@ class PredicateSuite extends SparkFunSuite with ExpressionEvalHelper {
   }
 
   test("basic IN/INSET predicate test") {
-    checkInAndInSet(In(NonFoldableLiteral.create(null, IntegerType), Seq(Literal(1),
-      Literal(2))), null)
-    checkInAndInSet(In(NonFoldableLiteral.create(null, IntegerType),
-      Seq(NonFoldableLiteral.create(null, IntegerType))), null)
-    checkInAndInSet(In(NonFoldableLiteral.create(null, IntegerType), Seq.empty), null)
-    checkInAndInSet(In(Literal(1), Seq.empty), false)
-    checkInAndInSet(In(Literal(1), Seq(NonFoldableLiteral.create(null, IntegerType))), null)
-    checkInAndInSet(In(Literal(1), Seq(Literal(1), NonFoldableLiteral.create(null, IntegerType))),
-      true)
-    checkInAndInSet(In(Literal(2), Seq(Literal(1), NonFoldableLiteral.create(null, IntegerType))),
-      null)
-    checkInAndInSet(In(Literal(1), Seq(Literal(1), Literal(2))), true)
-    checkInAndInSet(In(Literal(2), Seq(Literal(1), Literal(2))), true)
-    checkInAndInSet(In(Literal(3), Seq(Literal(1), Literal(2))), false)
+    Seq(true, false).foreach { legacyNullInBehavior =>
+      withSQLConf(SQLConf.LEGACY_NULL_IN_EMPTY_LIST_BEHAVIOR.key -> legacyNullInBehavior.toString) {
+        checkInAndInSet(In(NonFoldableLiteral.create(null, IntegerType), Seq(Literal(1),
+          Literal(2))), null)
+        checkInAndInSet(In(NonFoldableLiteral.create(null, IntegerType),
+          Seq(NonFoldableLiteral.create(null, IntegerType))), null)
+        checkInAndInSet(In(NonFoldableLiteral.create(null, IntegerType), Seq.empty),
+          expected = if (legacyNullInBehavior) null else false)
+        checkInAndInSet(In(Literal(1), Seq.empty), false)
+        checkInAndInSet(In(Literal(1), Seq(NonFoldableLiteral.create(null, IntegerType))), null)
+        checkInAndInSet(In(Literal(1),
+          Seq(Literal(1), NonFoldableLiteral.create(null, IntegerType))),
+          true)
+        checkInAndInSet(In(Literal(2),
+          Seq(Literal(1), NonFoldableLiteral.create(null, IntegerType))),
+          null)
+        checkInAndInSet(In(Literal(1), Seq(Literal(1), Literal(2))), true)
+        checkInAndInSet(In(Literal(2), Seq(Literal(1), Literal(2))), true)
+        checkInAndInSet(In(Literal(3), Seq(Literal(1), Literal(2))), false)
+      }
+    }
 
     checkEvaluation(
       And(In(Literal(1), Seq(Literal(1), Literal(2))), In(Literal(2), Seq(Literal(1),
@@ -534,7 +542,7 @@ class PredicateSuite extends SparkFunSuite with ExpressionEvalHelper {
       case TypeCheckResult.DataTypeMismatch(errorSubClass, messageParameters) =>
         assert(errorSubClass === "UNEXPECTED_INPUT_TYPE")
         assert(messageParameters === Map(
-          "paramIndex" -> "1",
+          "paramIndex" -> ordinalNumber(0),
           "requiredType" -> "\"BOOLEAN\"",
           "inputSql" -> "\"NULL\"",
           "inputType" -> "\"INT\""))
@@ -665,5 +673,15 @@ class PredicateSuite extends SparkFunSuite with ExpressionEvalHelper {
       Seq(Literal(Double.NaN), Literal(2d), Literal.create(null, DoubleType))), null)
     checkInAndInSet(In(Literal(Double.NaN),
       Seq(Literal(Double.NaN), Literal(2d), Literal.create(null, DoubleType))), true)
+  }
+
+  test("In and InSet logging limits") {
+    assert(In(Literal(1), Seq(Literal(1), Literal(2))).simpleString(1)
+      === "1 IN (1,... 1 more fields)")
+    assert(In(Literal(1), Seq(Literal(1), Literal(2))).simpleString(2) === "1 IN (1,2)")
+    assert(In(Literal(1), Seq(Literal(1))).simpleString(1) === "1 IN (1)")
+    assert(InSet(Literal(1), Set(1, 2)).simpleString(1) === "1 INSET 1, ... 1 more fields")
+    assert(InSet(Literal(1), Set(1, 2)).simpleString(2) === "1 INSET 1, 2")
+    assert(InSet(Literal(1), Set(1)).simpleString(1) === "1 INSET 1")
   }
 }

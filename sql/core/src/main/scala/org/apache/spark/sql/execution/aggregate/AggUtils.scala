@@ -76,10 +76,12 @@ object AggUtils {
       resultExpressions: Seq[NamedExpression] = Nil,
       child: SparkPlan): SparkPlan = {
     val useHash = Aggregate.supportsHashAggregate(
-      aggregateExpressions.flatMap(_.aggregateFunction.aggBufferAttributes))
+      aggregateExpressions.flatMap(_.aggregateFunction.aggBufferAttributes), groupingExpressions)
+
+    val forceObjHashAggregate = forceApplyObjectHashAggregate(child.conf)
     val forceSortAggregate = forceApplySortAggregate(child.conf)
 
-    if (useHash && !forceSortAggregate) {
+    if (useHash && !forceSortAggregate && !forceObjHashAggregate) {
       HashAggregateExec(
         requiredChildDistributionExpressions = requiredChildDistributionExpressions,
         isStreaming = isStreaming,
@@ -92,9 +94,10 @@ object AggUtils {
         child = child)
     } else {
       val objectHashEnabled = child.conf.useObjectHashAggregation
-      val useObjectHash = Aggregate.supportsObjectHashAggregate(aggregateExpressions)
+      val useObjectHash = Aggregate.supportsObjectHashAggregate(
+        aggregateExpressions, groupingExpressions)
 
-      if (objectHashEnabled && useObjectHash && !forceSortAggregate) {
+      if (forceObjHashAggregate || (objectHashEnabled && useObjectHash && !forceSortAggregate)) {
         ObjectHashAggregateExec(
           requiredChildDistributionExpressions = requiredChildDistributionExpressions,
           isStreaming = isStreaming,
@@ -427,8 +430,9 @@ object AggUtils {
     }
 
     if (groupWithoutSessionExpression.isEmpty) {
-      throw new AnalysisException("Global aggregation with session window in streaming query" +
-        " is not supported.")
+      throw new AnalysisException(
+        errorClass = "_LEGACY_ERROR_TEMP_3068",
+        messageParameters = Map.empty)
     }
 
     val groupingWithoutSessionAttributes = groupWithoutSessionExpression.map(_.toAttribute)
@@ -587,5 +591,14 @@ object AggUtils {
   private def forceApplySortAggregate(conf: SQLConf): Boolean = {
     Utils.isTesting &&
       conf.getConfString("spark.sql.test.forceApplySortAggregate", "false") == "true"
+  }
+
+  /**
+   * Returns whether a object hash aggregate should be force applied.
+   * The config key is hard-coded because it's testing only and should not be exposed.
+   */
+  private def forceApplyObjectHashAggregate(conf: SQLConf): Boolean = {
+    Utils.isTesting &&
+      conf.getConfString("spark.sql.test.forceApplyObjectHashAggregate", "false") == "true"
   }
 }

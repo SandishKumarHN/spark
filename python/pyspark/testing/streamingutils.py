@@ -21,7 +21,7 @@ import unittest
 
 from pyspark import SparkConf, SparkContext, RDD
 from pyspark.streaming import StreamingContext
-from pyspark.testing.utils import search_jar
+from pyspark.testing.sqlutils import search_jar
 
 
 # Must be same as the variable and condition defined in KinesisTestUtils.scala and modules.py
@@ -57,7 +57,6 @@ should_test_kinesis = kinesis_requirement_message is None
 
 
 class PySparkStreamingTestCase(unittest.TestCase):
-
     timeout = 30  # seconds
     duration = 0.5
 

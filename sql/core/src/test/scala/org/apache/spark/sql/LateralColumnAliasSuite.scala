@@ -20,7 +20,9 @@ package org.apache.spark.sql
 import org.scalactic.source.Position
 import org.scalatest.Tag
 
+import org.apache.spark.SparkRuntimeException
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, ExpressionSet}
+import org.apache.spark.sql.catalyst.parser.ParseException
 import org.apache.spark.sql.catalyst.plans.logical.Aggregate
 import org.apache.spark.sql.catalyst.trees.TreePattern.OUTER_REFERENCE
 import org.apache.spark.sql.internal.SQLConf
@@ -183,7 +185,7 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
       query: String, parameters: Map[String, String]): Unit = {
     checkError(
       exception = intercept[AnalysisException] {sql(query)},
-      errorClass = "AMBIGUOUS_LATERAL_COLUMN_ALIAS",
+      condition = "AMBIGUOUS_LATERAL_COLUMN_ALIAS",
       sqlState = "42702",
       parameters = parameters
     )
@@ -193,7 +195,7 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
       query: String, lca: String, windowExprRegex: String): Unit = {
     checkErrorMatchPVals(
       exception = intercept[AnalysisException] {sql(query)},
-      errorClass = "UNSUPPORTED_FEATURE.LATERAL_COLUMN_ALIAS_IN_WINDOW",
+      condition = "UNSUPPORTED_FEATURE.LATERAL_COLUMN_ALIAS_IN_WINDOW",
       parameters = Map("lca" -> lca, "windowExpr" -> windowExprRegex)
     )
   }
@@ -203,16 +205,19 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
     withLCAOn { checkAnswer(sql(query), expectedAnswerLCAOn) }
     withLCAOff {
       assert(intercept[AnalysisException]{ sql(query) }
-        .getErrorClass == "UNRESOLVED_COLUMN.WITH_SUGGESTION")
+        .getCondition == "UNRESOLVED_COLUMN.WITH_SUGGESTION")
     }
   }
 
   private def checkSameError(
-      q1: String, q2: String, errorClass: String, errorParams: Map[String, String]): Unit = {
+      q1: String,
+      q2: String,
+      condition: String,
+      errorParams: Map[String, String]): Unit = {
     val e1 = intercept[AnalysisException] { sql(q1) }
     val e2 = intercept[AnalysisException] { sql(q2) }
-    assert(e1.getErrorClass == errorClass)
-    assert(e2.getErrorClass == errorClass)
+    assert(e1.getCondition == condition)
+    assert(e2.getCondition == condition)
     errorParams.foreach { case (k, v) =>
       assert(e1.messageParameters.get(k).exists(_ == v))
       assert(e2.messageParameters.get(k).exists(_ == v))
@@ -257,7 +262,7 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
         exception = intercept[AnalysisException] {
           sql(s"SELECT 10000 AS lca, count(lca) FROM $testTable GROUP BY dept")
         },
-        errorClass = "UNSUPPORTED_FEATURE.LATERAL_COLUMN_ALIAS_IN_AGGREGATE_FUNC",
+        condition = "UNSUPPORTED_FEATURE.LATERAL_COLUMN_ALIAS_IN_AGGREGATE_FUNC",
         sqlState = "0A000",
         parameters = Map(
           "lca" -> "`lca`",
@@ -268,7 +273,7 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
         exception = intercept[AnalysisException] {
           sql(s"SELECT dept AS lca, avg(lca) FROM $testTable GROUP BY dept")
         },
-        errorClass = "UNSUPPORTED_FEATURE.LATERAL_COLUMN_ALIAS_IN_AGGREGATE_FUNC",
+        condition = "UNSUPPORTED_FEATURE.LATERAL_COLUMN_ALIAS_IN_AGGREGATE_FUNC",
         sqlState = "0A000",
         parameters = Map(
           "lca" -> "`lca`",
@@ -280,7 +285,7 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
         exception = intercept[AnalysisException] {
           sql(s"SELECT sum(salary) AS a, avg(a) FROM $testTable")
         },
-        errorClass = "UNSUPPORTED_FEATURE.LATERAL_COLUMN_ALIAS_IN_AGGREGATE_FUNC",
+        condition = "UNSUPPORTED_FEATURE.LATERAL_COLUMN_ALIAS_IN_AGGREGATE_FUNC",
         sqlState = "0A000",
         parameters = Map(
           "lca" -> "`a`",
@@ -513,8 +518,17 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
          |  FROM (SELECT 1 AS id1, id1 + 1 AS id2)) > 5
          |""".stripMargin
     withLCAOff {
-      assert(intercept[AnalysisException] { sql(query2) }
-        .getErrorClass == "UNRESOLVED_COLUMN.WITHOUT_SUGGESTION")
+      checkError(
+        exception = intercept[AnalysisException] {
+          sql(query2)
+        },
+        condition = "UNRESOLVED_COLUMN.WITHOUT_SUGGESTION",
+        sqlState = "42703",
+        parameters = Map("objectName" -> s"`id1`"),
+        context = ExpectedContext(
+          fragment = "id1",
+          start = 73,
+          stop = 75))
     }
     withLCAOn { checkAnswer(sql(query2), Seq.empty) }
 
@@ -541,7 +555,15 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
        |  FROM (SELECT dept * 2.0 AS id, id + 1 AS id2 FROM $testTable)) > 5
        |ORDER BY id
        |""".stripMargin
-    withLCAOff { intercept[AnalysisException] { sql(query4) } }
+    withLCAOff {
+      val exception = intercept[SparkRuntimeException] {
+        sql(query4).collect()
+      }
+      checkError(
+        exception,
+        condition = "SCALAR_SUBQUERY_TOO_MANY_ROWS"
+      )
+    }
     withLCAOn {
       val analyzedPlan = sql(query4).queryExecution.analyzed
       assert(!analyzedPlan.containsPattern(OUTER_REFERENCE))
@@ -668,12 +690,41 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
         s"FROM $testTable GROUP BY dept ORDER BY max(name)"),
       Row(1, 1) :: Row(2, 2) :: Row(6, 6) :: Nil
     )
+    checkAnswer(
+      sql("SELECT dept, avg(salary) AS a, a + 10 FROM employee GROUP BY dept ORDER BY max(name)"),
+      Row(1, 9500, 9510) :: Row(2, 11000, 11010) :: Row(6, 12000, 12010) :: Nil
+    )
+    checkAnswer(
+      sql("SELECT dept, avg(salary) AS a, a + 10 AS b " +
+        "FROM employee GROUP BY dept ORDER BY max(name)"),
+      Row(1, 9500, 9510) :: Row(2, 11000, 11010) :: Row(6, 12000, 12010) :: Nil
+    )
+    checkAnswer(
+      sql("SELECT dept, avg(salary) AS a, a + cast(10 as double) AS b " +
+        "FROM employee GROUP BY dept ORDER BY max(name)"),
+      Row(1, 9500, 9510) :: Row(2, 11000, 11010) :: Row(6, 12000, 12010) :: Nil
+    )
 
     // having cond is resolved by aggregate's child
     checkAnswer(
       sql(s"SELECT avg(bonus) AS dept, dept, avg(salary) AS a, a + 10 AS b " +
         s"FROM $testTable GROUP BY dept HAVING max(name) = 'david'"),
       Row(1250, 2, 11000, 11010) :: Nil
+    )
+    checkAnswer(
+      sql("SELECT dept, avg(salary) AS a, a + 10 " +
+        "FROM employee GROUP BY dept HAVING max(bonus) > 1200"),
+      Row(2, 11000, 11010) :: Nil
+    )
+    checkAnswer(
+      sql("SELECT dept, avg(salary) AS a, a + 10 AS b " +
+        "FROM employee GROUP BY dept HAVING max(bonus) > 1200"),
+      Row(2, 11000, 11010) :: Nil
+    )
+    checkAnswer(
+      sql("SELECT dept, avg(salary) AS a, a + cast(10 as double) AS b " +
+        "FROM employee GROUP BY dept HAVING max(bonus) > 1200"),
+      Row(2, 11000, 11010) :: Nil
     )
     // having cond is resolved by aggregate itself
     checkAnswer(
@@ -753,18 +804,44 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
   }
 
   test("Attribute cannot be resolved by LCA remain unresolved") {
-    assert(intercept[AnalysisException] {
-      sql(s"SELECT dept AS d, d AS new_dept, new_dep + 1 AS newer_dept FROM $testTable")
-    }.getErrorClass == "UNRESOLVED_COLUMN.WITH_SUGGESTION")
+    checkError(
+      exception = intercept[AnalysisException] {
+        sql(s"SELECT dept AS d, d AS new_dept, new_dep + 1 AS newer_dept FROM $testTable")
+      },
+      condition = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
+      sqlState = "42703",
+      parameters = Map("objectName" -> s"`new_dep`",
+        "proposal" -> "`dept`, `name`, `bonus`, `salary`, `properties`"),
+      context = ExpectedContext(
+        fragment = "new_dep",
+        start = 33,
+        stop = 39))
 
-    assert(intercept[AnalysisException] {
-      sql(s"SELECT count(name) AS cnt, cnt + 1, count(unresovled) FROM $testTable GROUP BY dept")
-    }.getErrorClass == "UNRESOLVED_COLUMN.WITH_SUGGESTION")
+    checkError(
+      exception = intercept[AnalysisException] {
+        sql(s"SELECT count(name) AS cnt, cnt + 1, count(unresovled) FROM $testTable GROUP BY dept")
+      },
+      condition = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
+      sqlState = "42703",
+      parameters = Map("objectName" -> s"`unresovled`",
+        "proposal" -> "`name`, `bonus`, `dept`, `properties`, `salary`"),
+      context = ExpectedContext(
+        fragment = "unresovled",
+        start = 42,
+        stop = 51))
 
-    assert(intercept[AnalysisException] {
-      sql(s"SELECT * FROM range(1, 7) WHERE (" +
-        s"SELECT id2 FROM (SELECT 1 AS id, other_id + 1 AS id2)) > 5")
-    }.getErrorClass == "UNRESOLVED_COLUMN.WITHOUT_SUGGESTION")
+    checkError(
+      exception = intercept[AnalysisException] {
+        sql(s"SELECT * FROM range(1, 7) WHERE (" +
+          s"SELECT id2 FROM (SELECT 1 AS id, other_id + 1 AS id2)) > 5")
+      },
+      condition = "UNRESOLVED_COLUMN.WITHOUT_SUGGESTION",
+      sqlState = "42703",
+      parameters = Map("objectName" -> s"`other_id`"),
+      context = ExpectedContext(
+        fragment = "other_id",
+        start = 66,
+        stop = 73))
   }
 
   test("Pushed-down aggregateExpressions should have no duplicates") {
@@ -777,7 +854,7 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
        |""".stripMargin
     val analyzedPlan = sql(query).queryExecution.analyzed
     analyzedPlan.collect {
-      case Aggregate(_, aggregateExpressions, _) =>
+      case Aggregate(_, aggregateExpressions, _, _) =>
         val extracted = aggregateExpressions.collect {
           case Alias(child, _) => child
           case a: Attribute => a
@@ -829,15 +906,29 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
       s"SELECT avg(salary) AS a, a           + dept + 10 FROM $testTable GROUP BY dept + 10",
       "\"dept\""
     )
-    Seq(
-      s"SELECT dept AS a, dept, " +
-      s"(SELECT count(col) FROM VALUES (1), (2) AS data(col) WHERE col = dept) $groupBySeg",
-      s"SELECT dept AS a, a, " +
-      s"(SELECT count(col) FROM VALUES (1), (2) AS data(col) WHERE col = dept) $groupBySeg"
-    ).foreach { query =>
-      val e = intercept[AnalysisException] { sql(query) }
-      assert(e.getErrorClass == "_LEGACY_ERROR_TEMP_2423")
-    }
+    checkError(
+      exception = intercept[AnalysisException] { sql(
+        "SELECT dept AS a, dept, " +
+          s"(SELECT count(col) FROM VALUES (1), (2) AS data(col) WHERE col = dept) $groupBySeg") },
+      condition = "SCALAR_SUBQUERY_IS_IN_GROUP_BY_OR_AGGREGATE_FUNCTION",
+      parameters = Map("sqlExpr" -> "\"scalarsubquery(dept)\""),
+      context = ExpectedContext(
+        fragment = "(SELECT count(col) FROM VALUES (1), (2) AS data(col) WHERE col = dept)",
+        start = 24,
+        stop = 93)
+    )
+    checkError(
+      exception = intercept[AnalysisException] { sql(
+        "SELECT dept AS a, a, " +
+          s"(SELECT count(col) FROM VALUES (1), (2) AS data(col) WHERE col = dept) $groupBySeg"
+      ) },
+      condition = "SCALAR_SUBQUERY_IS_IN_GROUP_BY_OR_AGGREGATE_FUNCTION",
+      parameters = Map("sqlExpr" -> "\"scalarsubquery(dept)\""),
+      context = ExpectedContext(
+        fragment = "(SELECT count(col) FROM VALUES (1), (2) AS data(col) WHERE col = dept)",
+        start = 21,
+        stop = 90)
+    )
 
     // one exception: no longer throws NESTED_AGGREGATE_FUNCTION but UNSUPPORTED_FEATURE
     Seq("", windowSeg).foreach { windowExpr =>
@@ -845,7 +936,7 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
         exception = intercept[AnalysisException] {
           sql(s"SELECT avg(salary) AS a, avg(a) $windowExpr $groupBySeg")
         },
-        errorClass = "UNSUPPORTED_FEATURE.LATERAL_COLUMN_ALIAS_IN_AGGREGATE_FUNC",
+        condition = "UNSUPPORTED_FEATURE.LATERAL_COLUMN_ALIAS_IN_AGGREGATE_FUNC",
         sqlState = "0A000",
         parameters = Map("lca" -> "`a`", "aggFunc" -> "\"avg(lateralAliasReference(a))\"")
       )
@@ -855,14 +946,14 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
   test("Leaf expression as aggregate expressions should be eligible to lift up") {
     // literal
     sql(s"select 1, avg(salary) as m, m + 1 from $testTable group by dept")
-      .queryExecution.assertAnalyzed
+      .queryExecution.assertAnalyzed()
     // leaf expression current_date, now and etc
     sql(s"select current_date(), max(salary) as m, m + 1 from $testTable group by dept")
-      .queryExecution.assertAnalyzed
+      .queryExecution.assertAnalyzed()
     sql("select dateadd(month, 5, current_date()), min(salary) as m, m + 1 as n " +
-      s"from $testTable group by dept").queryExecution.assertAnalyzed
+      s"from $testTable group by dept").queryExecution.assertAnalyzed()
     sql(s"select now() as n, dateadd(day, -1, n) from $testTable group by name")
-      .queryExecution.assertAnalyzed
+      .queryExecution.assertAnalyzed()
   }
 
   test("Aggregate expressions containing no aggregate or grouping expressions still resolves") {
@@ -925,12 +1016,12 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
       lca = "`jy`", windowExprRegex = "\"sum.*\"")
     // this is initially not supported
     checkError(
-      exception = intercept[AnalysisException] {
+      exception = intercept[ParseException] {
         sql("select name, dept, 1 as n, rank() over " +
           "(partition by dept order by salary rows between n preceding and current row) as rank " +
           s"from $testTable where dept in (1, 6)")
       },
-      errorClass = "_LEGACY_ERROR_TEMP_0064",
+      condition = "_LEGACY_ERROR_TEMP_0064",
       parameters = Map("msg" -> "Frame bound value must be a literal."),
       context = ExpectedContext(fragment = "n preceding", start = 87, stop = 97)
     )
@@ -1096,7 +1187,7 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
           "sum_avg * 1.0 as sum_avg1, sum_avg1 + dept " +
           s"from $testTable group by dept, properties.joinYear $havingSuffix"
       ).foreach { query =>
-        assert(intercept[AnalysisException](sql(query)).getErrorClass ==
+        assert(intercept[AnalysisException](sql(query)).getCondition ==
           "UNSUPPORTED_FEATURE.LATERAL_COLUMN_ALIAS_IN_AGGREGATE_WITH_WINDOW_AND_HAVING")
       }
     }
@@ -1109,7 +1200,7 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
         s"from $testTable",
       s"select dept as d, d,    rank() over (partition by dept order by avg(salary)) " +
         s"from $testTable",
-      errorClass = "MISSING_GROUP_BY",
+      condition = "MISSING_GROUP_BY",
       errorParams = Map.empty
     )
     checkSameError(
@@ -1117,11 +1208,179 @@ class LateralColumnAliasSuite extends LateralColumnAliasSuiteBase {
         s"from $testTable",
       "select salary as s, s,      sum(sum(salary)) over (partition by dept order by salary) " +
         s"from $testTable",
-      errorClass = "MISSING_GROUP_BY",
+      condition = "MISSING_GROUP_BY",
       errorParams = Map.empty
     )
 
     // non group by or non aggregate function in Aggregate queries negative cases are covered in
     // "Aggregate expressions not eligible to lift up, throws same error as inline".
+  }
+
+  test("Still resolves when Aggregate with LCA is not the direct child of Having") {
+    // Previously there was a limitation of lca that it can't resolve the query when it satisfies
+    // all the following criteria:
+    //  1) the main (outer) query has having clause
+    //  2) there is a window expression in the query
+    //  3) in the same SELECT list as the window expression in 2), there is an lca
+    // Though [UNSUPPORTED_FEATURE.LATERAL_COLUMN_ALIAS_IN_AGGREGATE_WITH_WINDOW_AND_HAVING] is
+    // still not supported, after SPARK-44714, a lot other limitations are
+    // lifted because it allows to resolve LCA when the query has UnresolvedHaving but its direct
+    // child does not contain an LCA.
+    // Testcases in this test focus on this change regarding enablement of resolution.
+
+    // CTE definition contains window and LCA; outer query contains having
+    checkAnswer(
+      sql(
+        s"""
+           |with w as (
+           |  select name, dept, salary, rank() over (partition by dept order by salary) as r, r
+           |  from $testTable
+           |)
+           |select dept
+           |from w
+           |group by dept
+           |having max(salary) > 10000
+           |""".stripMargin),
+      Row(2) :: Row(6) :: Nil
+    )
+    checkAnswer(
+      sql(
+        s"""
+           |with w as (
+           |  select name, dept, salary, rank() over (partition by dept order by salary) as r, r
+           |  from $testTable
+           |)
+           |select dept as d, d
+           |from w
+           |group by dept
+           |having max(salary) > 10000
+           |""".stripMargin),
+      Row(2, 2) :: Row(6, 6) :: Nil
+    )
+    checkAnswer(
+      sql(
+        s"""
+           |with w as (
+           |  select name, dept, salary, rank() over (partition by dept order by salary) as r, r
+           |  from $testTable
+           |)
+           |select dept as d
+           |from w
+           |group by dept
+           |having d = 2
+           |""".stripMargin),
+      Row(2) :: Nil
+    )
+
+    // inner subquery contains window and LCA; outer query contains having
+    checkAnswer(
+      sql(
+        s"""
+          |SELECT
+          |  dept
+          |FROM
+          |   (
+          |    select
+          |      name, dept, salary, rank() over (partition by dept order by salary) as r,
+          |      1 as a, a + 1 as e
+          |    FROM
+          |      $testTable
+          |  ) AS inner_t
+          |GROUP BY
+          |  dept
+          |HAVING max(salary) > 10000
+          |""".stripMargin),
+      Row(2) :: Row(6) :: Nil
+    )
+    checkAnswer(
+      sql(
+        s"""
+           |SELECT
+           |  dept as d, d
+           |FROM
+           |   (
+           |    select
+           |      name, dept, salary, rank() over (partition by dept order by salary) as r,
+           |      1 as a, a + 1 as e
+           |    FROM
+           |      $testTable
+           |  ) AS inner_t
+           |GROUP BY
+           |  dept
+           |HAVING max(salary) > 10000
+           |""".stripMargin),
+      Row(2, 2) :: Row(6, 6) :: Nil
+    )
+    checkAnswer(
+      sql(
+        s"""
+           |SELECT
+           |  dept as d
+           |FROM
+           |   (
+           |    select
+           |      name, dept, salary, rank() over (partition by dept order by salary) as r,
+           |      1 as a, a + 1 as e
+           |    FROM
+           |      $testTable
+           |  ) AS inner_t
+           |GROUP BY
+           |  dept
+           |HAVING d = 2
+           |""".stripMargin),
+      Row(2) :: Nil
+    )
+  }
+
+  test("LCA internal error should have lower priority") {
+    // in this query, the 'order by Freq DESC' error should be the top error surfaced to users
+    checkError(
+      exception = intercept[AnalysisException] {
+        sql(
+          """
+            |WITH group_counts AS (
+            |  SELECT id, count(*) as Freq, CASE WHEN Freq <= 10 THEN "1" ELSE "2" END AS Group
+            |  FROM values (123) as data(id)
+            |  GROUP BY id
+            |)
+            |SELECT Group, count(*) * 100.0 / (select count(*) from group_counts) AS Percentage
+            |FROM group_counts
+            |Group BY Group
+            |ORDER BY Freq DESC;
+            |""".stripMargin
+        )
+      },
+      condition = "UNRESOLVED_COLUMN.WITH_SUGGESTION",
+      sqlState = "42703",
+      parameters = Map(
+        "objectName" -> "`Freq`",
+        "proposal" -> "`Percentage`, `group_counts`.`Group`"
+      ),
+      context = ExpectedContext(
+        fragment = "Freq",
+        start = 280,
+        stop = 283)
+    )
+
+    // the states are cleared - a subsequent correct query should succeed
+    sql("select 1 as a, a").queryExecution.assertAnalyzed()
+  }
+
+  test("LateralColumnAlias with Generate") {
+    checkAnswer(
+      sql("WITH cte AS (SELECT EXPLODE(ARRAY(1, 2, 3)) AS c1, c1) SELECT * FROM cte"),
+      Row(1, 1) :: Row(2, 2) :: Row(3, 3) :: Nil
+    )
+    checkAnswer(
+      sql(
+        s"""
+           |SELECT
+           |  explode(split(name , ',')) AS new_name,
+           |  new_name like 'a%'
+           |FROM $testTable
+           |""".stripMargin),
+      Row("alex", true) :: Row("amy", true) :: Row("cathy", false) ::
+        Row("david", false) :: Row("jen", false) :: Nil
+    )
   }
 }

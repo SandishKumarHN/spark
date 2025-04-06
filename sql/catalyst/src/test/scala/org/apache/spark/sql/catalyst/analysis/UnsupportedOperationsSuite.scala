@@ -115,11 +115,11 @@ class UnsupportedOperationsSuite extends SparkFunSuite with SQLHelper {
     Aggregate(Seq(attributeWithWatermark), aggExprs("d"), streamRelation),
     outputMode = Append)
 
-  assertNotSupportedInStreamingPlan(
+  assertOutputModeNotSupportedInStreamingPlan(
     "aggregate - streaming aggregations without watermark in append mode",
     Aggregate(Nil, aggExprs("d"), streamRelation),
-    outputMode = Append,
-    expectedMsgs = Seq("streaming aggregations", "without watermark"))
+    Append,
+    "streaming aggregations without watermark")
 
   // Aggregation: Distinct aggregates not supported on streaming relation
   val distinctAggExprs = Seq(Count("*").toAggregateExpression(isDistinct = true).as("c"))
@@ -683,7 +683,7 @@ class UnsupportedOperationsSuite extends SparkFunSuite with SQLHelper {
     def func(k: Int, left: Iterator[Int], right: Iterator[Int]): Iterator[Int] = {
       Iterator.empty
     }
-    implicit val intEncoder = ExpressionEncoder[Int]
+    implicit val intEncoder = ExpressionEncoder[Int]()
 
     left.cogroup[Int, Int, Int, Int](
       right,
@@ -738,7 +738,9 @@ class UnsupportedOperationsSuite extends SparkFunSuite with SQLHelper {
   testUnaryOperatorInStreamingPlan(
     "sample", Sample(0.1, 1, true, 1L, _), expectedMsg = "sampling")
   testUnaryOperatorInStreamingPlan(
-    "window", Window(Nil, Nil, Nil, _), expectedMsg = "non-time-based windows")
+    "window",
+    Window(Nil, Nil, Nil, _),
+    condition = "NON_TIME_WINDOW_NOT_SUPPORTED_IN_STREAMING")
 
   // Output modes with aggregation and non-aggregation plans
   testOutputMode(Append, shouldSupportAggregation = false, shouldSupportNonAggregation = true)
@@ -867,10 +869,11 @@ class UnsupportedOperationsSuite extends SparkFunSuite with SQLHelper {
    * supports having a batch child plan, forming a batch subplan inside a streaming plan.
    */
   def testUnaryOperatorInStreamingPlan(
-    operationName: String,
-    logicalPlanGenerator: LogicalPlan => LogicalPlan,
-    outputMode: OutputMode = Append,
-    expectedMsg: String = ""): Unit = {
+      operationName: String,
+      logicalPlanGenerator: LogicalPlan => LogicalPlan,
+      outputMode: OutputMode = Append,
+      expectedMsg: String = "",
+      condition: String = ""): Unit = {
 
     val expectedMsgs = if (expectedMsg.isEmpty) Seq(operationName) else Seq(expectedMsg)
 
@@ -878,7 +881,8 @@ class UnsupportedOperationsSuite extends SparkFunSuite with SQLHelper {
       s"$operationName with stream relation",
       wrapInStreaming(logicalPlanGenerator(streamRelation)),
       outputMode,
-      expectedMsgs)
+      expectedMsgs,
+      condition)
 
     assertSupportedInStreamingPlan(
       s"$operationName with batch relation",
@@ -961,11 +965,11 @@ class UnsupportedOperationsSuite extends SparkFunSuite with SQLHelper {
         streamRelation.groupBy("a")("count(*)"),
         outputMode = outputMode)
     } else {
-      assertNotSupportedInStreamingPlan(
-        s"$outputMode output mode - aggregation",
+      assertOutputModeNotSupportedInStreamingPlan(
+        s"$outputMode output mode - aggregation without watermark",
         streamRelation.groupBy("a")("count(*)"),
-        outputMode = outputMode,
-        Seq("aggregation", s"$outputMode output mode"))
+        outputMode,
+        "streaming aggregations without watermark")
     }
 
     // non aggregation
@@ -975,11 +979,11 @@ class UnsupportedOperationsSuite extends SparkFunSuite with SQLHelper {
         streamRelation.where($"a" > 1),
         outputMode = outputMode)
     } else {
-      assertNotSupportedInStreamingPlan(
+      assertOutputModeNotSupportedInStreamingPlan(
         s"$outputMode output mode - no aggregation",
         streamRelation.where($"a" > 1),
-        outputMode = outputMode,
-        Seq("aggregation", s"$outputMode output mode"))
+        outputMode,
+        "no streaming aggregations")
     }
   }
 
@@ -1025,11 +1029,34 @@ class UnsupportedOperationsSuite extends SparkFunSuite with SQLHelper {
       name: String,
       plan: LogicalPlan,
       outputMode: OutputMode,
-      expectedMsgs: Seq[String]): Unit = {
+      expectedMsgs: Seq[String],
+      condition: String = ""): Unit = {
     testError(
       s"streaming plan - $name: not supported",
-      expectedMsgs :+ "streaming" :+ "DataFrame" :+ "Dataset" :+ "not supported") {
+      expectedMsgs :+ "streaming" :+ "DataFrame" :+ "Dataset" :+ "not supported",
+      condition) {
       UnsupportedOperationChecker.checkForStreaming(wrapInStreaming(plan), outputMode)
+    }
+  }
+
+  /**
+   * Assert that output model is not supported in streaming plan.
+   */
+  def assertOutputModeNotSupportedInStreamingPlan(
+      name: String,
+      plan: LogicalPlan,
+      outputMode: OutputMode,
+      operation: String): Unit = {
+    test(s"streaming plan - $name: not supported") {
+      checkError(
+        exception = intercept[AnalysisException] {
+          UnsupportedOperationChecker.checkForStreaming(wrapInStreaming(plan), outputMode)
+        },
+        condition = "STREAMING_OUTPUT_MODE.UNSUPPORTED_OPERATION",
+        sqlState = "42KDE",
+        parameters = Map(
+          "outputMode" -> outputMode.toString.toLowerCase(Locale.ROOT),
+          "operation" -> operation))
     }
   }
 
@@ -1090,7 +1117,10 @@ class UnsupportedOperationsSuite extends SparkFunSuite with SQLHelper {
    * Test whether the body of code will fail. If it does fail, then check if it has expected
    * messages.
    */
-  def testError(testName: String, expectedMsgs: Seq[String])(testBody: => Unit): Unit = {
+  def testError(
+      testName: String,
+      expectedMsgs: Seq[String],
+      condition: String = "")(testBody: => Unit): Unit = {
 
     test(testName) {
       val e = intercept[AnalysisException] {
@@ -1101,6 +1131,9 @@ class UnsupportedOperationsSuite extends SparkFunSuite with SQLHelper {
           fail(s"Exception message should contain: '$m', " +
             s"actual exception message:\n\t'${e.getMessage}'")
         }
+      }
+      if (!condition.isEmpty) {
+        assert(e.getCondition == condition)
       }
     }
   }
